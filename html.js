@@ -148,7 +148,6 @@ function findInterpolationSites(fragment, templateId) {
 						node: element,
 						type,
 						attributeName: processedName,
-						originalName: name,
 						parts: parsedParts,
 					})
 
@@ -350,7 +349,6 @@ export function html(strings, ...values) {
  *   node: Node,
  *   type: 'text'|'attribute'|'event'|'boolean-attribute'|'property',
  *   attributeName?: string,
- *   originalName?: string,
  *   parts?: Array<string | number>,
  *   currentHandler?: EventListener
  * }} InterpolationSite

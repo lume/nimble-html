@@ -19,7 +19,7 @@ from GitHub into your JS code (using the raw.githack.com proxy):
 
 ```html
 <script type="module">
-  import {html} from 'https://rawcdn.githack.com/lume/html/90e00ba9e859459ef56593b767ec2a616514e6fc/html.js'
+  import {html} from 'https://cdn.githack.com/lume/html/main/html.js'
 
   const feeling = 'wonderfulness'
   const div = html`<div>${feeling}</div>`()

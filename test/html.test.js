@@ -286,9 +286,11 @@ test('Event handler as function', () => {
 	assertTrue(clicked2, 'Event handler2 should be called')
 })
 
+const global = /** @type {any} */ (globalThis)
+
 test('Event handler as dynamic string', () => {
-	/** @type {any} */ ;(globalThis).__clicked = false
-	/** @type {any} */ ;(globalThis).__clicked2 = false
+	global.__clicked = false
+	global.__clicked2 = false
 	const handler = '__clicked = true'
 	const handler2 = '__clicked2 = true'
 	const key = Symbol()
@@ -300,22 +302,22 @@ test('Event handler as dynamic string', () => {
 	// Simulate click
 	button.click()
 
-	assertTrue(/** @type {any} */ (globalThis).__clicked, 'Event handler should be called')
+	assertTrue(global.__clicked, 'Event handler should be called')
 
-	/** @type {any} */ ;(globalThis).__clicked = false
+	global.__clicked = false
 
 	tmpl(handler2) // change the handler
 
 	// Simulate click
 	button.click()
 
-	assertTrue(!(/** @type {any} */ (globalThis).__clicked), 'Event handler should be removed')
-	assertTrue(/** @type {any} */ (globalThis).__clicked2, 'Event handler2 should be called')
+	assertTrue(!global.__clicked, 'Event handler should be removed')
+	assertTrue(global.__clicked2, 'Event handler2 should be called')
 })
 
 test('Event handler as static string', () => {
-	/** @type {any} */ ;(globalThis).__clicked = false
-	/** @type {any} */ ;(globalThis).__clicked2 = false
+	global.__clicked = false
+	global.__clicked2 = false
 	const key = Symbol()
 
 	const tmpl = () => html`<button @click="__clicked = true">Click me</button>`(key)
@@ -326,7 +328,7 @@ test('Event handler as static string', () => {
 	// Simulate click
 	button.click()
 
-	assertTrue(/** @type {any} */ (globalThis).__clicked, 'Event handler should be called')
+	assertTrue(global.__clicked, 'Event handler should be called')
 })
 
 test('Multiple elements at top level', () => {
