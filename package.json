@@ -5,7 +5,7 @@
 		"build:watch": "tsc --watch",
 		"typecheck": "tsc --noEmit",
 		"typecheck:watch": "tsc --noEmit --watch",
-		"test": "npm run typecheck && web-test-runner",
+		"test": "npm run typecheck && prettier . --check && web-test-runner",
 		"test:watch": "web-test-runner --watch",
 		"prettier": "prettier --write ."
 	},

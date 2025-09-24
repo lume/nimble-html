@@ -13,11 +13,60 @@ const instanceCache = new Map()
 /** Unique marker for interpolation sites */
 const INTERPOLATION_MARKER = '⧙⧘'
 
+/** RegExp for matching interpolation markers */
+const INTERPOLATION_REGEXP = new RegExp(`${INTERPOLATION_MARKER}(\\d+)${INTERPOLATION_MARKER}`)
+
 /**
  * Map to store original case for property names
  * @type {Map<TemplateStringsArray, Map<string, string>>}
  */
 const caseMap = new Map()
+
+/**
+ * Parse parts array, converting alternating indices to numbers
+ * @param {string[]} parts
+ * @returns {(string|number)[]}
+ */
+function parseInterpolationParts(parts) {
+	return parts
+		.map((part, i) => (i % 2 === 1 ? parseInt(part) : part))
+		.filter(part => typeof part === 'number' || part.trim() !== '')
+}
+
+/**
+ * Join parts with value substitution
+ * @param {(string|number)[]} parts
+ * @param {InterpolationValue[]} values
+ * @returns {string}
+ */
+function joinPartsWithValues(parts, values) {
+	return parts
+		.map((/** @type {string|number} */ part) => (typeof part === 'number' ? String(values[part] ?? '') : part))
+		.join('')
+}
+
+/**
+ * Handle boolean attribute setting/removing
+ * @param {Element} element
+ * @param {string} attributeName
+ * @param {any} value
+ */
+function handleBooleanAttribute(element, attributeName, value) {
+	if (value) element.setAttribute(attributeName, '')
+	else element.removeAttribute(attributeName)
+}
+
+/**
+ * Add event listener and store reference
+ * @param {Element} element
+ * @param {string} eventName
+ * @param {EventListener} eventListener
+ * @param {InterpolationSite} site
+ */
+function addEventListenerToSite(element, eventName, eventListener, site) {
+	element.addEventListener(eventName, eventListener)
+	site.currentHandler = eventListener
+}
 
 /**
  * Parse HTML template with interpolation markers
@@ -29,9 +78,10 @@ function parseTemplate(strings) {
 	if (cached) return cached
 
 	// Join strings with interpolation markers
-	let htmlString = strings.reduce((acc, str, i) => {
-		return acc + str + (i < strings.length - 1 ? `${INTERPOLATION_MARKER}${i}${INTERPOLATION_MARKER}` : '')
-	}, '')
+	let htmlString = strings.reduce(
+		(acc, str, i) => acc + str + (i < strings.length - 1 ? `${INTERPOLATION_MARKER}${i}${INTERPOLATION_MARKER}` : ''),
+		'',
+	)
 
 	// Preprocessing for case sensitivity: map .someProp to .someprop and remember the original
 	const templateId = strings
@@ -85,12 +135,8 @@ function findInterpolationSites(fragment, templateId) {
 			const textContent = node.textContent || ''
 			if (textContent.includes(INTERPOLATION_MARKER)) {
 				// Parse interpolation indices
-				const parts = textContent.split(new RegExp(`${INTERPOLATION_MARKER}(\\d+)${INTERPOLATION_MARKER}`))
-				const parsedParts = parts
-					.map((part, i) => {
-						return i % 2 === 1 ? parseInt(part) : part
-					})
-					.filter(part => typeof part === 'number' || part.trim() !== '')
+				const parts = textContent.split(INTERPOLATION_REGEXP)
+				const parsedParts = parseInterpolationParts(parts)
 
 				sites.push({
 					node,
@@ -116,12 +162,8 @@ function findInterpolationSites(fragment, templateId) {
 					// Parse attribute value parts (for interpolated content)
 					let parsedParts
 					if (value.includes(INTERPOLATION_MARKER)) {
-						const parts = value.split(new RegExp(`${INTERPOLATION_MARKER}(\\d+)${INTERPOLATION_MARKER}`))
-						parsedParts = parts
-							.map((part, i) => {
-								return i % 2 === 1 ? parseInt(part) : part
-							})
-							.filter(part => typeof part === 'number' || part.trim() !== '')
+						const parts = value.split(INTERPOLATION_REGEXP)
+						parsedParts = parseInterpolationParts(parts)
 					} else {
 						// Static content
 						parsedParts = [value]
@@ -169,19 +211,11 @@ function findInterpolationSites(fragment, templateId) {
 function applyValues(sites, values) {
 	sites.forEach(site => {
 		if (site.type === 'text') {
-			const textValue = (site.parts || [])
-				.map((/** @type {string|number} */ part) => {
-					return typeof part === 'number' ? String(values[part] ?? '') : part
-				})
-				.join('')
+			const textValue = joinPartsWithValues(site.parts || [], values)
 			site.node.textContent = textValue
 		} else if (site.type === 'attribute') {
 			const element = /** @type {Element} */ (site.node)
-			const attrValue = (site.parts || [])
-				.map((/** @type {string|number} */ part) => {
-					return typeof part === 'number' ? String(values[part] ?? '') : part
-				})
-				.join('')
+			const attrValue = joinPartsWithValues(site.parts || [], values)
 			element.setAttribute(site.attributeName || '', attrValue)
 		} else if (site.type === 'boolean-attribute') {
 			const element = /** @type {Element} */ (site.node)
@@ -190,41 +224,24 @@ function applyValues(sites, values) {
 			if (parts.length === 1 && typeof parts[0] === 'number') {
 				// Pure interpolation - boolean logic
 				const value = values[parts[0]]
-				if (value) {
-					element.setAttribute(site.attributeName || '', '')
-				} else {
-					element.removeAttribute(site.attributeName || '')
-				}
+				handleBooleanAttribute(element, site.attributeName || '', value)
 			} else if (parts.length === 1 && typeof parts[0] === 'string') {
 				// Static content - check if string is truthy (non-empty)
 				const value = parts[0]
-				if (value && value.trim() !== '') {
-					element.setAttribute(site.attributeName || '', '')
-				} else {
-					element.removeAttribute(site.attributeName || '')
-				}
+				handleBooleanAttribute(element, site.attributeName || '', value && value.trim() !== '')
 			} else {
 				// Mixed content - always truthy (has both static and dynamic parts)
-				const attrValue = parts
-					.map((/** @type {string|number} */ part) => {
-						return typeof part === 'number' ? String(values[part] ?? '') : part
-					})
-					.join('')
+				const attrValue = joinPartsWithValues(parts, values)
 				element.setAttribute(site.attributeName || '', attrValue)
 			}
 		} else if (site.type === 'property') {
 			const element = /** @type {Element} */ (site.node)
 			const parts = site.parts || []
 			const propValue =
-				parts.length === 1 && typeof parts[0] === 'number'
-					? values[parts[0]]
-					: parts
-							.map((/** @type {string|number} */ part) => {
-								return typeof part === 'number' ? String(values[part] ?? '') : part
-							})
-							.join('')
+				parts.length === 1 && typeof parts[0] === 'number' ? values[parts[0]] : joinPartsWithValues(parts, values)
 			const attrName = site.attributeName || ''
-			;/** @type {any} */ (element)[attrName] = propValue
+			const anyElement = /** @type {any} */ (element)
+			anyElement[attrName] = propValue
 		} else if (site.type === 'event') {
 			const element = /** @type {Element} */ (site.node)
 
@@ -242,25 +259,18 @@ function applyValues(sites, values) {
 				const handler = values[parts[0]]
 				if (typeof handler === 'function') {
 					const eventListener = /** @type {EventListener} */ (handler)
-					element.addEventListener(eventName, eventListener)
-					site.currentHandler = eventListener
+					addEventListenerToSite(element, eventName, eventListener, site)
 				} else if (typeof handler === 'string') {
 					const eventListener = /** @type {EventListener} */ (new Function('event', handler))
-					element.addEventListener(eventName, eventListener)
-					site.currentHandler = eventListener
+					addEventListenerToSite(element, eventName, eventListener, site)
 				} else {
 					throw new TypeError(`Event handler for ${eventName} must be a function or string`)
 				}
 			} else {
 				// Mixed content - treat as code string
-				const handlerCode = parts
-					.map((/** @type {string|number} */ part) => {
-						return typeof part === 'number' ? String(values[part] ?? '') : part
-					})
-					.join('')
+				const handlerCode = joinPartsWithValues(parts, values)
 				const eventListener = /** @type {EventListener} */ (new Function('event', handlerCode))
-				element.addEventListener(eventName, eventListener)
-				site.currentHandler = eventListener
+				addEventListenerToSite(element, eventName, eventListener, site)
 			}
 		}
 	})
