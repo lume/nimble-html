@@ -1,0 +1,18 @@
+{
+	"scripts": {
+		"start": "five-server . --open=examples/",
+		"build": "tsc",
+		"build:watch": "tsc --watch",
+		"typecheck": "tsc --noEmit",
+		"typecheck:watch": "tsc --noEmit --watch",
+		"test": "npm run typecheck && web-test-runner",
+		"test:watch": "web-test-runner --watch",
+		"prettier": "prettier --write ."
+	},
+	"devDependencies": {
+		"@web/test-runner": "^0.20.2",
+		"five-server": "^0.4.4",
+		"prettier": "^3.6.2",
+		"typescript": "^5.9.2"
+	}
+}
