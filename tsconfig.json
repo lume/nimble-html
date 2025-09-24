@@ -14,7 +14,7 @@
 		"verbatimModuleSyntax": true,
 
 		"lib": ["DOM", "DOM.Iterable", "ES2023"],
-		"types": [],
+		"types": ["@types/mocha"],
 
 		"skipLibCheck": true,
 		"strict": true,

@@ -10,6 +10,7 @@
 		"prettier": "prettier --write ."
 	},
 	"devDependencies": {
+		"@types/mocha": "^10.0.10",
 		"@web/test-runner": "^0.20.2",
 		"five-server": "^0.4.4",
 		"prettier": "^3.6.2",
