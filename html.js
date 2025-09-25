@@ -1,4 +1,45 @@
 /**
+ * Framework-agnostic `html` template tag function.
+ * @param {TemplateStringsArray} strings
+ * @param {...InterpolationValue} values
+ * @returns {Function} Function that accepts a key and returns DOM nodes
+ */
+export function html(strings, ...values) {
+	const template = parseTemplate(strings)
+	const templateId = strings
+
+	// Get or create template entry in instance cache
+	let templateEntry = instanceCache.get(templateId)
+	if (!templateEntry) instanceCache.set(templateId, (templateEntry = {template, instances: new Map()}))
+
+	return function (/** @type {any} */ key) {
+		let nodes
+		let sites
+
+		// Check if we already have an instance for this key
+		let templateInstance = templateEntry.instances.get(key)
+		if (templateInstance) {
+			nodes = templateInstance.nodes
+			sites = templateInstance.sites
+		} else {
+			// Create new instance
+			const fragment = /** @type {DocumentFragment} */ (template.content.cloneNode(true))
+
+			sites = findInterpolationSites(fragment, templateId)
+			nodes = Array.from(fragment.childNodes)
+
+			// Store both nodes and sites for future updates
+			templateEntry.instances.set(key, {nodes, sites})
+		}
+
+		// Update instance with new values
+		applyValues(sites, values)
+
+		return nodes.length === 1 ? nodes[0] : nodes
+	}
+}
+
+/**
  * Template cache based on template strings (source location)
  * @type {WeakMap<TemplateStringsArray, HTMLTemplateElement>}
  */
@@ -28,9 +69,36 @@ const caseMap = new Map()
  * @returns {(string|number)[]}
  */
 function parseInterpolationParts(parts) {
-	return parts
-		.map((part, i) => (i % 2 === 1 ? parseInt(part) : part))
-		.filter(part => typeof part === 'number' || part.trim() !== '')
+	return parts.map((part, i) => (i % 2 === 1 ? parseInt(part) : part))
+
+	// .filter(part => typeof part === 'number' || part.trim() !== '')
+	// @copilot ^ when the previous line is commented out, the "Basic text
+	// interpolation" test passes and some tests fail. When this is not
+	// commented out, the "Basic text interpolation" test fails and other tests
+	// pass. The goal is to leave whitespace text as-is, and we don't want to
+	// filter anything out.  What we want is for code like this:
+	//
+	// ```js
+	// const div = html`
+	//     <div>
+	//         value: ${value}
+	//     </div>
+	// `(key)
+	// ```
+	//
+	// to preserve the whitespace inside the `<div>...</div>`. The div should
+	// have three text nodes:
+	//
+	// 1. `\n        value: `
+	// 2. `${value}`
+	// 3. `\n    `
+	//
+	// We only remove whitespace-only text nodes that are not inside an element
+	// but at the top level of the template, in the `parseTemplate` function.
+	// See the note there.
+	//
+	// Fix the code so that it preserves all parts, including whitespace, and
+	// dynamic text nodes map one-to-one with their interpolation values.
 }
 
 /**
@@ -45,33 +113,15 @@ function joinPartsWithValues(parts, values) {
 		.join('')
 }
 
-/**
- * Handle boolean attribute setting/removing
- * @param {Element} element
- * @param {string} attributeName
- * @param {any} value
- */
-function handleBooleanAttribute(element, attributeName, value) {
-	if (value) element.setAttribute(attributeName, '')
-	else element.removeAttribute(attributeName)
-}
+/** This regex matches . followed by a JS identifier. */
+const JS_PROP_REGEXP = /\.([A-Za-z][A-Za-z0-9]*)/g
 
 /**
- * Add event listener and store reference
- * @param {Element} element
- * @param {string} eventName
- * @param {EventListener} eventListener
- * @param {InterpolationSite} site
- */
-function addEventListenerToSite(element, eventName, eventListener, site) {
-	element.addEventListener(eventName, eventListener)
-	site.currentHandler = eventListener
-}
-
-/**
- * Parse HTML template with interpolation markers
+ * Create a <template> with interpolation markers given the template string parts.
  * @param {TemplateStringsArray} strings
- * @returns {HTMLTemplateElement}
+ * @returns {HTMLTemplateElement} A `<template>` element with the DOM
+ * representation of the HTML, with interpolation markers in place, to be cloned
+ * for any "instance" of the template.
  */
 function parseTemplate(strings) {
 	let cached = templateCache.get(strings)
@@ -88,8 +138,17 @@ function parseTemplate(strings) {
 	const caseMappings = new Map()
 	let counter = 0
 
-	htmlString = htmlString.replace(/\.([A-Za-z][A-Za-z0-9]*)/g, (_, propName) => {
-		const placeholder = `.casepreserved${counter}`
+	// How the case-preserved${count} works:
+	// 1. We replace all .someProp, .otherProp, etc with .case-preserved0,
+	//    .case-preserved1, etc and store the mapping from .case-preserved0 ->
+	//    someProp, .case-preserved1 -> otherProp, etc in caseMappings.
+	// 2. Later, when processing the attributes, we can look up the original
+	//    case-sensitive property name using the placeholder.
+	// 3. This allows us to avoid issues with HTML attribute names being
+	//    case-insensitive, while still preserving the original case for JS
+	//    property names so we can set them correctly on the elements.
+	htmlString = htmlString.replace(JS_PROP_REGEXP, (_, propName) => {
+		const placeholder = `.case-preserved${counter}`
 		caseMappings.set(placeholder.slice(1), propName) // Store without the dot
 		counter++
 		return placeholder
@@ -97,22 +156,78 @@ function parseTemplate(strings) {
 
 	caseMap.set(templateId, caseMappings)
 
-	// Use DOMParser to parse the HTML
+	// Use the standard HTML parser to parse the string into a document
 	const parser = new DOMParser()
 	const doc = parser.parseFromString(htmlString, 'text/html')
 
-	// Check for parsing errors
 	const parseError = doc.querySelector('parsererror')
-	if (parseError) {
-		throw new SyntaxError(`HTML parsing error: ${parseError.textContent}`)
-	}
+	if (parseError) throw new SyntaxError(`HTML parsing error: ${parseError.textContent}`)
 
-	// Create template element
 	const template = document.createElement('template')
 
-	// Move body contents to template
+	// Move the nodes from the parsed document to the template content
 	const bodyChildren = Array.from(doc.body.childNodes)
 	bodyChildren.forEach(node => template.content.appendChild(node))
+
+	// Remove empty whitespace-only text nodes, from the top level of the
+	// template only, for the convenience of being able to easily get references
+	// to top level nodes. This allows usage like the following for a single top
+	// level element:
+	//
+	// ```js
+	// const div = html`
+	//   <div>
+	//     ...
+	//   </div>
+	// `()
+	// ```
+	//
+	// Text nodes that are not direct children of the template (f.e. inside
+	// elements) are not removed, to preserve whitespace where it may be
+	// significant.
+	//
+	// This only removes text nodes that are entirely static whitespace. Text
+	// nodes that contain interpolation markers, or non-whitespace content, are
+	// preserved. This allows getting access to top level text nodes that may
+	// contain important content. For example:
+	//
+	// ```js
+	// const nodes = html`
+	//   ${someDynamicContent}
+	//   <div>...</div>
+	// `()
+	// const textNode = nodes[0]; // Access the dynamic text node
+	// const div = nodes[1]; // Access the div element
+	// ```
+	//
+	// If you need whitespace to be preserved, consider using explicit markers
+	// like `${' '}` for spaces at the top level, or wrapping text in elements.
+	// For example:
+	//
+	// ```js
+	// const nodes = html`
+	//   <pre>
+	//     All text inside elements is preserved, including whitespace.
+	//     ${someDynamicContent}
+	//   </pre>
+	//   ${' '/* this explicit whitespace is preserved */}
+	//   <span>...</span>
+	//   This text node without whitespace is also preserved.
+	// `()
+	//
+	// const pre = nodes[0];
+	// const textNode = nodes[1]; // This is the explicit whitespace text node
+	// const span = nodes[2];
+	// const textNode2 = nodes[3]; // This is the static text node
+	// ```
+	//
+	// This makes accessing top level nodes easy, based on the visual structure
+	// of the template.
+	for (const node of template.content.childNodes) {
+		if (node.nodeType !== Node.TEXT_NODE) continue
+		if (!(node.textContent || '').includes(INTERPOLATION_MARKER) && (node.textContent || '').trim() === '')
+			node.parentNode?.removeChild(node)
+	}
 
 	templateCache.set(strings, template)
 	return template
@@ -138,11 +253,7 @@ function findInterpolationSites(fragment, templateId) {
 				const parts = textContent.split(INTERPOLATION_REGEXP)
 				const parsedParts = parseInterpolationParts(parts)
 
-				sites.push({
-					node,
-					type: /** @type {'text'} */ ('text'),
-					parts: parsedParts,
-				})
+				sites.push({node, type: /** @type {'text'} */ ('text'), parts: parsedParts})
 			}
 		} else if (node.nodeType === Node.ELEMENT_NODE) {
 			const element = /** @type {Element} */ (node)
@@ -161,37 +272,29 @@ function findInterpolationSites(fragment, templateId) {
 				) {
 					// Parse attribute value parts (for interpolated content)
 					let parsedParts
-					if (value.includes(INTERPOLATION_MARKER)) {
-						const parts = value.split(INTERPOLATION_REGEXP)
-						parsedParts = parseInterpolationParts(parts)
-					} else {
-						// Static content
-						parsedParts = [value]
-					}
+					if (value.includes(INTERPOLATION_MARKER))
+						parsedParts = parseInterpolationParts(value.split(INTERPOLATION_REGEXP))
+					// Static content
+					else parsedParts = [value]
 
-					// Determine attribute type and restore case for properties
+					// Determine attribute type and restore case for JS properties
 					/** @type {'attribute'|'boolean-attribute'|'property'|'event'} */
 					let type = 'attribute'
 					let processedName = name
 
 					if (name.startsWith('?')) {
 						type = 'boolean-attribute'
-						processedName = name.slice(1)
+						processedName = name.slice(1) // Remove the question mark
 					} else if (name.startsWith('.')) {
 						type = 'property'
 						const placeholder = name.slice(1) // Remove the dot
 						processedName = caseMappings.get(placeholder) || placeholder
 					} else if (name.startsWith('@')) {
 						type = 'event'
-						processedName = name.slice(1)
+						processedName = name.slice(1) // Remove the at symbol
 					}
 
-					sites.push({
-						node: element,
-						type,
-						attributeName: processedName,
-						parts: parsedParts,
-					})
+					sites.push({node: element, type, attributeName: processedName, parts: parsedParts})
 
 					// Remove the template attribute
 					element.removeAttribute(name)
@@ -211,40 +314,34 @@ function findInterpolationSites(fragment, templateId) {
 function applyValues(sites, values) {
 	sites.forEach(site => {
 		if (site.type === 'text') {
-			const textValue = joinPartsWithValues(site.parts || [], values)
-			site.node.textContent = textValue
+			site.node.textContent = joinPartsWithValues(site.parts || [], values)
 		} else if (site.type === 'attribute') {
 			const element = /** @type {Element} */ (site.node)
-			const attrValue = joinPartsWithValues(site.parts || [], values)
-			element.setAttribute(site.attributeName || '', attrValue)
+			element.setAttribute(site.attributeName || '', joinPartsWithValues(site.parts || [], values))
 		} else if (site.type === 'boolean-attribute') {
 			const element = /** @type {Element} */ (site.node)
-
 			const parts = site.parts || []
-			if (parts.length === 1 && typeof parts[0] === 'number') {
-				// Pure interpolation - boolean logic
-				const value = values[parts[0]]
-				handleBooleanAttribute(element, site.attributeName || '', value)
-			} else if (parts.length === 1 && typeof parts[0] === 'string') {
-				// Static content - check if string is truthy (non-empty)
-				const value = parts[0]
-				handleBooleanAttribute(element, site.attributeName || '', value && value.trim() !== '')
-			} else {
-				// Mixed content - always truthy (has both static and dynamic parts)
-				const attrValue = joinPartsWithValues(parts, values)
-				element.setAttribute(site.attributeName || '', attrValue)
-			}
+
+			let value = null
+			// Pure interpolation - boolean logic
+			if (parts.length === 1 && typeof parts[0] === 'number') value = values[parts[0]]
+			// Static content - check if string is truthy (non-empty)
+			else if (parts.length === 1 && typeof parts[0] === 'string') value = parts[0]
+			// Mixed content - always truthy (has both static and dynamic parts)
+			else value = joinPartsWithValues(parts, values)
+
+			if (value) element.setAttribute(site.attributeName || '', '')
+			else element.removeAttribute(site.attributeName || '')
 		} else if (site.type === 'property') {
 			const element = /** @type {Element} */ (site.node)
 			const parts = site.parts || []
 			const propValue =
 				parts.length === 1 && typeof parts[0] === 'number' ? values[parts[0]] : joinPartsWithValues(parts, values)
-			const attrName = site.attributeName || ''
+			const propName = site.attributeName || ''
 			const anyElement = /** @type {any} */ (element)
-			anyElement[attrName] = propValue
+			anyElement[propName] = propValue
 		} else if (site.type === 'event') {
 			const element = /** @type {Element} */ (site.node)
-
 			const parts = site.parts || []
 			const eventName = site.attributeName || ''
 
@@ -254,78 +351,24 @@ function applyValues(sites, values) {
 				site.currentHandler = undefined
 			}
 
+			let eventListener
 			if (parts.length === 1 && typeof parts[0] === 'number') {
 				// Pure interpolation
 				const handler = values[parts[0]]
-				if (typeof handler === 'function') {
-					const eventListener = /** @type {EventListener} */ (handler)
-					addEventListenerToSite(element, eventName, eventListener, site)
-				} else if (typeof handler === 'string') {
-					const eventListener = /** @type {EventListener} */ (new Function('event', handler))
-					addEventListenerToSite(element, eventName, eventListener, site)
-				} else {
-					throw new TypeError(`Event handler for ${eventName} must be a function or string`)
-				}
+				if (typeof handler === 'function') eventListener = /** @type {EventListener} */ (handler)
+				else if (typeof handler === 'string')
+					eventListener = /** @type {EventListener} */ (new Function('event', handler))
+				else throw new TypeError(`Event handler for ${eventName} must be a function or string`)
 			} else {
 				// Mixed content - treat as code string
 				const handlerCode = joinPartsWithValues(parts, values)
-				const eventListener = /** @type {EventListener} */ (new Function('event', handlerCode))
-				addEventListenerToSite(element, eventName, eventListener, site)
+				eventListener = /** @type {EventListener} */ (new Function('event', handlerCode))
 			}
+
+			element.addEventListener(eventName, eventListener)
+			site.currentHandler = eventListener
 		}
 	})
-}
-
-/**
- * Framework-agnostic `html` template tag function.
- * @param {TemplateStringsArray} strings
- * @param {...InterpolationValue} values
- * @returns {Function} Function that accepts a key and returns DOM nodes
- */
-export function html(strings, ...values) {
-	const template = parseTemplate(strings)
-	const templateId = strings
-
-	return function (/** @type {any} */ key) {
-		// Get or create template entry in instance cache
-		let templateEntry = instanceCache.get(templateId)
-		if (!templateEntry) {
-			templateEntry = {template, instances: new Map()}
-			instanceCache.set(templateId, templateEntry)
-		}
-
-		// Check if we already have an instance for this key
-		let existingData = templateEntry.instances.get(key)
-		if (existingData) {
-			// Update existing instance with new values by applying to cached sites
-			applyValues(existingData.sites, values)
-			return existingData.nodes.length === 1 ? existingData.nodes[0] : existingData.nodes
-		}
-
-		// Create new instance
-		const fragment = /** @type {DocumentFragment} */ (template.content.cloneNode(true))
-
-		// Remove empty text nodes (whitespace-only) before finding sites
-		const nodesToRemove = []
-		const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT, null)
-		let textNode
-		while ((textNode = walker.nextNode())) {
-			if (!textNode.textContent?.includes(INTERPOLATION_MARKER) && (textNode.textContent || '').trim() === '') {
-				nodesToRemove.push(textNode)
-			}
-		}
-		nodesToRemove.forEach(node => node.parentNode?.removeChild(node))
-
-		const sites = findInterpolationSites(fragment, templateId)
-		applyValues(sites, values)
-
-		const nodes = Array.from(fragment.childNodes)
-
-		// Store both nodes and sites for future updates
-		templateEntry.instances.set(key, {nodes, sites})
-
-		return nodes.length === 1 ? nodes[0] : nodes
-	}
 }
 
 /**

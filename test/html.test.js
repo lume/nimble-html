@@ -7,7 +7,7 @@ import {html} from '../html.js'
  */
 function assertEquals(actual, expected, message = '') {
 	if (actual !== expected) {
-		throw new Error(`Assertion failed: ${message}\nExpected: ${expected}\nActual: ${actual}`)
+		throw new Error(`Assertion failed: ${message}\nExpected: >>>${expected}<<<\nActual: >>>${actual}<<<`)
 	}
 }
 
@@ -26,11 +26,23 @@ describe('html template function', () => {
 		const value = 'hello world'
 		const key = Symbol()
 
-		const div = html` <div>value: ${value}</div> `(key)
+		// prettier-ignore
+		const div = html`
+            <div>
+                value: ${value}
+            </div>
+        `(key)
 
 		assertTrue(div instanceof HTMLDivElement, 'Should return HTMLDivElement')
 		assertTrue(div.textContent.includes('hello world'), 'Should contain interpolated value')
-		assertEquals(div.textContent, 'value: hello world', 'Text content should match')
+		// Ensure whitespace inside elements is preserved.
+		assertEquals(
+			'#' + div.textContent + '#',
+			`#
+                value: hello world
+            #`,
+			'Text content should match',
+		)
 	})
 
 	it('Same key returns same instance', () => {
@@ -172,16 +184,18 @@ describe('html template function', () => {
 	it('Property setting without quotes', () => {
 		const key = Symbol()
 		/** @param {string} value */
-		const tmpl = value => html`<some-el .someProp=${value}></some-el>`(key)
+		const tmpl = value => html`<some-el .someProp=${value} .otherProp=${value + 1}></some-el>`(key)
 
 		let val = 'test value'
 		const el = tmpl(val)
 		assertEquals(el.someProp, val, 'Property should be set initially')
+		assertEquals(el.otherProp, val + 1, 'Property should be set initially')
 
 		val = 'new value'
 		const el2 = tmpl(val)
 		assertEquals(el, el2, 'Should be the same elements')
 		assertEquals(el.someProp, val, 'Property should be updated after template re-run')
+		assertEquals(el.otherProp, val + 1, 'Property should be updated after template re-run')
 	})
 
 	it('Property setting with quotes', () => {
