@@ -1,5 +1,7 @@
 /**
- * Framework-agnostic `html` template tag function.
+ * Framework-agnostic tiny `html` template tag function for declarative DOM
+ * creation and updates.
+ *
  * @param {TemplateStringsArray} strings
  * @param {...InterpolationValue} values
  * @returns {(key: any) => TemplateNodes} A function that accepts a key for
@@ -180,18 +182,9 @@ function parseTemplate(strings) {
 
 	caseMap.set(templateId, caseMappings)
 
-	// Use the standard HTML parser to parse the string into a document
-	const parser = new DOMParser()
-	const doc = parser.parseFromString(htmlString, 'text/html')
-
-	const parseError = doc.querySelector('parsererror')
-	if (parseError) throw new SyntaxError(`HTML parsing error: ${parseError.textContent}`)
-
+	// Use the standard HTML parser to parse the string into a template document
 	const template = document.createElement('template')
-
-	// Move the nodes from the parsed document to the template content
-	const bodyChildren = Array.from(doc.body.childNodes)
-	for (const node of bodyChildren) template.content.appendChild(node)
+	template.innerHTML = htmlString
 
 	// Pre-split text nodes that contain interpolation markers
 	// This is done once during template creation for better performance
