@@ -312,13 +312,13 @@ describe('html template function', () => {
 	it('Event handler as dynamic string', () => {
 		global.__clicked = false
 		global.__clicked2 = false
-		const handler = '__clicked = true'
-		const handler2 = '__clicked2 = true'
+		const codeString = '__clicked = true'
+		const codeString2 = '__clicked2 = true'
 		const key = Symbol()
 
 		/** @param {string} handler */
-		const tmpl = handler => html`<button @click=${handler}>Click me</button>`(key)
-		const [button] = /** @type {[HTMLButtonElement]} */ (tmpl(handler))
+		const tmpl = handler => html`<button .prop=${123} @click=${handler}>Click me</button>`(key)
+		const [button] = /** @type {[HTMLButtonElement]} */ (tmpl(codeString))
 
 		// Simulate click
 		button.click()
@@ -327,7 +327,7 @@ describe('html template function', () => {
 
 		global.__clicked = false
 
-		tmpl(handler2) // change the handler
+		tmpl(codeString2) // change the handler
 
 		// Simulate click
 		button.click()
@@ -341,7 +341,7 @@ describe('html template function', () => {
 		global.__clicked2 = false
 		const key = Symbol()
 
-		const tmpl = () => html`<button @click="__clicked = true">Click me</button>`(key)
+		const tmpl = () => html`<button .prop=${123} @click="__clicked = true">Click me</button>`(key)
 		const [button] = /** @type {[HTMLButtonElement]} */ (tmpl())
 
 		assertTrue(!button.hasAttribute('@click'), 'It should not set the @click attribute') // Lit fails this test
@@ -798,6 +798,65 @@ describe('html template function', () => {
 		assertEquals(myEl2?.textContent, 'value: sun light', 'MyTestEl should have updated content')
 		// Ensure only the test element's value was updated, but that the element was not unnecessarily re-connected
 		assertEquals(myEl2?.connectedCount, 1, 'MyTestEl connectedCallback should have not been called again')
+
+		div.remove()
+	})
+
+	it('causes no mutations when template is updated with same value', async () => {
+		const key = Symbol()
+		const value = 'stable value'
+
+		/** @param {string} val */
+		const template = val => {
+			return html`
+				<div class="${val}" .someProp=${val} ?disabled=${val === 'disabled'} @click=${() => {}}>
+					Text content: ${val}
+					<span>${val}</span>
+					${html`<pre>${val} </pre>`}
+				</div>
+			`(key)
+		}
+
+		// Initial render
+		const [div] = /** @type {[HTMLDivElement]} */ (template(value))
+		document.body.appendChild(div)
+
+		// Set up MutationObserver to track any DOM changes
+		let mutationCount = 0
+		const mutations = /** @type {MutationRecord[]} */ ([])
+		const observer = new MutationObserver(mutationRecords => {
+			mutationCount += mutationRecords.length
+			mutations.push(...mutationRecords)
+		})
+
+		// Observe all types of mutations on the element and its subtree
+		observer.observe(div, {
+			childList: true,
+			attributes: true,
+			characterData: true,
+			subtree: true,
+			attributeOldValue: true,
+			characterDataOldValue: true,
+		})
+
+		// Re-render with the exact same value - should cause no mutations
+		template(value)
+
+		// Wait a microtask to ensure the MutationObserver microtask has ran
+		await Promise.resolve()
+
+		observer.disconnect()
+
+		assertEquals(mutationCount, 0, 'Should have no mutations when re-rendering with same value')
+		assertEquals(mutations.length, 0, 'Mutations array should be empty')
+
+		// Verify the content is still correct
+		assertTrue(div.textContent.includes('Text content: stable value'), 'Should still have correct text content')
+		assertTrue(div.getAttribute('class') === 'stable value', 'Should still have correct class attribute')
+		assertEquals(/** @type {any} */ (div).someProp, 'stable value', 'Should still have correct property')
+
+		const span = div.querySelector('span')
+		assertTrue(span?.textContent === 'stable value', 'Should still have correct nested content')
 
 		div.remove()
 	})

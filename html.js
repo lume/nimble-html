@@ -342,6 +342,7 @@ function findInterpolationSites(fragment, templateId) {
  * @returns {boolean}
  */
 function arrayEquals(a, b) {
+	if (!Array.isArray(a) || !Array.isArray(b)) return false
 	if (a.length !== b.length) return false
 	for (let i = 0, l = a.length; i < l; i++) if (a[i] !== b[i]) return false
 	return true
@@ -351,7 +352,6 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 	// Handle nested templates and DOM elements
 	if (value instanceof Node) {
 		const insertedNodes = site.insertedNodes
-
 		if (insertedNodes && arrayEquals(insertedNodes, [value])) return // No change
 
 		// Remove previous nodes from a different interpolation
@@ -361,9 +361,9 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 		site.node.parentNode?.insertBefore(value, site.node)
 		site.node.textContent = '' // Hide the text node (f.e. ${bool ? html`<div></div>` : 'text'} switching from text to DOM)
 		site.insertedNodes = [/** @type {Element | Text} */ (value)]
+		site.cachedValue = value
 	} else if (Array.isArray(value) && value.length > 0 && value.every(item => item instanceof Node)) {
 		const insertedNodes = site.insertedNodes
-
 		if (insertedNodes && arrayEquals(insertedNodes, value)) return // No change
 
 		// Remove previous nodes from a different interpolation
@@ -373,15 +373,18 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 		for (const node of value) site.node.parentNode?.insertBefore(node, site.node)
 		site.node.textContent = '' // Hide the text node (f.e. ${bool ? html`<div></div>` : 'text'} switching from text to DOM)
 		site.insertedNodes = /** @type {(Element | Text)[]} */ ([...value])
+		site.cachedValue = value
 	} else {
-		const insertedNodes = site.insertedNodes
+		if (site.cachedValue === value) return // No change
 
 		// Remove previous nodes from a different interpolation (f.e. ${bool ? html`<div></div>` : 'text'} switching from DOM to text)
+		const insertedNodes = site.insertedNodes
 		if (insertedNodes) for (const node of insertedNodes) node.remove()
 
 		// Regular text interpolation
 		site.node.textContent = String(value ?? '')
 		site.insertedNodes = undefined
+		site.cachedValue = value
 	}
 }
 
@@ -408,8 +411,12 @@ function applyValues(sites, values, currentKey) {
 			const parts = site.parts || []
 
 			// Check for nested templates/DOM in attributes - this should throw
+			// Only check values that are actually used in this attribute's parts
+			const attributeValues = parts.filter(part => typeof part === 'number').map(part => values[part])
+			if (arrayEquals(/** @type {unknown[]} */ (site.cachedValue), attributeValues)) continue // No change
+
 			if (
-				values.some(
+				attributeValues.some(
 					value =>
 						value instanceof Node ||
 						(Array.isArray(value) && value.length > 0 && value.some(item => item instanceof Node)) ||
@@ -421,7 +428,9 @@ function applyValues(sites, values, currentKey) {
 				)
 			}
 
-			element.setAttribute(site.attributeName || '', joinPartsWithValues(parts, values))
+			const newAttributeValue = joinPartsWithValues(parts, values)
+			element.setAttribute(site.attributeName || '', newAttributeValue)
+			site.cachedValue = attributeValues
 		} else if (site.type === 'boolean-attribute') {
 			const element = /** @type {Element} */ (site.node)
 			const parts = site.parts || []
@@ -435,8 +444,12 @@ function applyValues(sites, values, currentKey) {
 			// Mixed content - always truthy (has both static and dynamic parts)
 			else setAttribute = true
 
+			if (site.cachedValue === setAttribute) continue // No change
+
 			if (setAttribute) element.setAttribute(site.attributeName || '', '')
 			else element.removeAttribute(site.attributeName || '')
+
+			site.cachedValue = setAttribute
 		} else if (site.type === 'property') {
 			const element = /** @type {Element} */ (site.node)
 			const parts = site.parts || []
@@ -448,13 +461,25 @@ function applyValues(sites, values, currentKey) {
 			// Mixed content or static content
 			else propValue = joinPartsWithValues(parts, values)
 
+			if (site.cachedValue === propValue) continue // No change
+
 			const propName = site.attributeName || ''
 			const anyElement = /** @type {any} */ (element)
 			anyElement[propName] = propValue
+			site.cachedValue = propValue
 		} else if (site.type === 'event') {
 			const element = /** @type {Element} */ (site.node)
 			const parts = site.parts || []
 			const eventName = site.attributeName || ''
+
+			// Determine the current handler value for comparison
+			let inputValue
+			if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number')
+				inputValue = values[parts[1]]
+			else inputValue = joinPartsWithValues(parts, values)
+
+			// Only update event handler if it has changed
+			if (site.cachedValue === inputValue) continue // No change
 
 			// Remove previous event listener if it exists
 			if (site.currentHandler) {
@@ -466,10 +491,9 @@ function applyValues(sites, values, currentKey) {
 			// Pure interpolation - pattern is ['', number, '']
 			if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number') {
 				// Pure interpolation
-				const handler = values[parts[1]]
-				if (typeof handler === 'function') eventListener = /** @type {EventListener} */ (handler)
-				else if (typeof handler === 'string')
-					eventListener = /** @type {EventListener} */ (new Function('event', handler))
+				if (typeof inputValue === 'function') eventListener = /** @type {EventListener} */ (inputValue)
+				else if (typeof inputValue === 'string')
+					eventListener = /** @type {EventListener} */ (new Function('event', inputValue))
 				else throw new TypeError(`Event handler for ${eventName} must be a function or string`)
 			} else {
 				// Mixed content - treat as code string
@@ -479,6 +503,7 @@ function applyValues(sites, values, currentKey) {
 
 			element.addEventListener(eventName, eventListener)
 			site.currentHandler = eventListener
+			site.cachedValue = inputValue
 		}
 	}
 }
@@ -521,6 +546,7 @@ function applyValues(sites, values, currentKey) {
  *   parts?: Array<string | number>,
  *   currentHandler?: EventListener,
  *   interpolationIndex?: number,
- *   insertedNodes?: (Element | Text)[]
+ *   insertedNodes?: (Element | Text)[],
+ *   cachedValue?: unknown
  * }} InterpolationSite
  */
