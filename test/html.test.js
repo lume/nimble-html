@@ -6,9 +6,8 @@ import {html} from '../html.js'
  * @param {string} message
  */
 function assertEquals(actual, expected, message = '') {
-	if (actual !== expected) {
+	if (actual !== expected)
 		throw new Error(`Assertion failed: ${message}\nExpected: >>>${expected}<<<\nActual: >>>${actual}<<<`)
-	}
 }
 
 /**
@@ -16,10 +15,34 @@ function assertEquals(actual, expected, message = '') {
  * @param {string} message
  */
 function assertTrue(condition, message = '') {
-	if (!condition) {
-		throw new Error(`Assertion failed: ${message}\nExpected truthy value`)
+	if (!condition) throw new Error(`Assertion failed: ${message}\nExpected truthy value`)
+}
+
+class MyTestEl extends HTMLElement {
+	#value = 123
+
+	get value() {
+		return this.#value
+	}
+	set value(v) {
+		this.#value = v
+		this.template() // update rendering
+	}
+
+	template() {
+		return html` <div>value: ${this.value}</div> `(this)
+	}
+
+	connectedCount = 0
+
+	connectedCallback() {
+		this.append(...this.template())
+
+		this.connectedCount++
 	}
 }
+
+customElements.define('my-test-el', MyTestEl)
 
 describe('html template function', () => {
 	it('Basic text interpolation', () => {
@@ -27,22 +50,35 @@ describe('html template function', () => {
 		const key = Symbol()
 
 		// prettier-ignore
-		const div = html`
-            <div>
-                value: ${value}
-            </div>
-        `(key)
+		const [div, p] = html`
+			<div>
+				value: ${value}
+			</div>
+
+			<p>
+				value: ${value}
+			</p>
+		`(key)
+
+		function testContent(/**@type {Element | Text} */ el) {
+			assertTrue(el.textContent.includes('hello world'), 'Should contain interpolated value')
+			// Ensure whitespace inside elements is preserved, and that a text node
+			// for a text interpolation contains only the interpolated value and not
+			// any surrounding static text.
+			assertEquals(el.textContent, `\n				value: hello world\n			`, 'Text content should match')
+			assertEquals(el.childNodes.length, 3, 'Should have 3 child nodes (static text, text interpolation, static text)')
+			assertEquals(el.childNodes[0].textContent, `\n				value: `, 'First child node should be static text')
+			assertEquals(el.childNodes[1].textContent, 'hello world', 'Second child node should be interpolated value')
+			assertEquals(el.childNodes[2].textContent, `\n			`, 'Third child node should be static text')
+		}
 
 		assertTrue(div instanceof HTMLDivElement, 'Should return HTMLDivElement')
-		assertTrue(div.textContent.includes('hello world'), 'Should contain interpolated value')
-		// Ensure whitespace inside elements is preserved.
-		assertEquals(
-			'#' + div.textContent + '#',
-			`#
-                value: hello world
-            #`,
-			'Text content should match',
-		)
+		testContent(div)
+
+		// Second test to ensure the tree walker that splits text nodes traverse
+		// beyond the first interpolated text node it replaces.
+		assertTrue(p instanceof HTMLParagraphElement, 'Should return HTMLParagraphElement')
+		testContent(p)
 	})
 
 	it('Same key returns same instance', () => {
@@ -53,11 +89,11 @@ describe('html template function', () => {
 			return html`<div>${value}</div>`(key)
 		}
 
-		const div1 = render('first call')
+		const [div1] = render('first call')
 
 		assertEquals(div1.textContent, 'first call', 'Content should be updated')
 
-		const div2 = render('second call')
+		const [div2] = render('second call')
 
 		assertTrue(div1 === div2, 'Same key should return same DOM instance')
 		assertEquals(div2.textContent, 'second call', 'Content should be updated')
@@ -72,8 +108,8 @@ describe('html template function', () => {
 			return html`<div>${value}</div>`
 		}
 
-		const div1 = render('same text')(key1)
-		const div2 = render('same text')(key2)
+		const [div1] = render('same text')(key1)
+		const [div2] = render('same text')(key2)
 
 		assertTrue(div1 !== div2, 'Different keys should return different instances')
 		assertEquals(div1.textContent, 'same text', 'First instance content')
@@ -81,19 +117,25 @@ describe('html template function', () => {
 	})
 
 	it('Basic attribute interpolation without quotes', () => {
-		const value = 'my-class'
+		let value = 'my-class'
 		const key = Symbol()
 
-		const div = html`<div class=${value}>content</div>`(key)
+		const template = () => /** @type {[HTMLDivElement]} */ (html`<div class=${value}>content</div>`(key))
+		const [div] = template()
 
 		assertEquals(div.getAttribute('class'), 'my-class', 'Attribute without quotes should be interpolated')
+
+		value = 'new-class'
+		template()
+
+		assertEquals(div.getAttribute('class'), 'new-class', 'Attribute should be updated after template re-run')
 	})
 
 	it('Basic attribute interpolation with quotes', () => {
 		const value = 'my-class'
 		const key = Symbol()
 
-		const div = html`<div class="${value}">content</div>`(key)
+		const [div] = /** @type {[HTMLDivElement]} */ (html`<div class="${value}">content</div>`(key))
 
 		assertEquals(div.getAttribute('class'), 'my-class', 'Attribute with quotes should be interpolated')
 	})
@@ -102,44 +144,44 @@ describe('html template function', () => {
 		const value = 'dynamic'
 		const key = Symbol()
 
-		const div = html`<div class="${value} static-class">content</div>`(key)
+		const [div] = /** @type {[HTMLDivElement]} */ (html`<div class="${value} static-class">content</div>`(key))
 
 		assertEquals(div.getAttribute('class'), 'dynamic static-class', 'Mixed attribute should work')
 	})
 
 	it('Boolean attributes', () => {
-		const input1 = html`<input ?disabled="" />`({})
+		const [input1] = /** @type {[HTMLInputElement]} */ (html`<input ?disabled="" />`({}))
 		assertTrue(
 			!input1.hasAttribute('disabled'),
 			'Should not have disabled attribute when string from static content is falsy',
 		)
 		assertTrue(!input1.hasAttribute('?disabled'), 'It should not set the ?disabled attribute') // Lit fails this test
 
-		const input2 = html`<input ?disabled="abc" />`({})
+		const [input2] = /** @type {[HTMLInputElement]} */ (html`<input ?disabled="abc" />`({}))
 		assertTrue(
 			input2.hasAttribute('disabled'),
 			'Should have disabled attribute when string from static content is truthy',
 		)
 		assertTrue(!input2.hasAttribute('?disabled'), 'It should not set the ?disabled attribute') // Lit fails this test
 
-		const input3 = html`<input ?disabled=${true} />`({})
+		const [input3] = /** @type {[HTMLInputElement]} */ (html`<input ?disabled=${true} />`({}))
 		assertTrue(input3.hasAttribute('disabled'), 'Should have disabled attribute when true without quotes')
 
-		const input4 = html`<input ?disabled=${false} />`({})
+		const [input4] = /** @type {[HTMLInputElement]} */ (html`<input ?disabled=${false} />`({}))
 		assertTrue(!input4.hasAttribute('disabled'), 'Should not have disabled attribute when false without quotes')
 
-		const input5 = html`<input ?disabled="${true}" />`({})
+		const [input5] = /** @type {[HTMLInputElement]} */ (html`<input ?disabled="${true}" />`({}))
 		assertTrue(input5.hasAttribute('disabled'), 'Should have disabled attribute when true with quotes')
 
-		const input6 = html`<input ?disabled="${false}" />`({})
+		const [input6] = /** @type {[HTMLInputElement]} */ (html`<input ?disabled="${false}" />`({}))
 		assertTrue(!input6.hasAttribute('disabled'), 'Should not have disabled attribute when false with quotes')
 
 		/** @param {boolean} bool */
 		const tmpl7 = bool => html`<input ?disabled=${bool} />`
 		const key7 = {}
-		const input7 = tmpl7(true)(key7)
+		const [input7] = /** @type {[HTMLInputElement]} */ (tmpl7(true)(key7))
 		assertTrue(input7.hasAttribute('disabled'), 'Should have disabled attribute when true')
-		const input7b = tmpl7(false)(key7)
+		const [input7b] = /** @type {[HTMLInputElement]} */ (tmpl7(false)(key7))
 		assertEquals(input7, input7b, 'Should be the same elements')
 		assertTrue(
 			!input7.hasAttribute('disabled'),
@@ -149,9 +191,9 @@ describe('html template function', () => {
 		/** @param {boolean} bool */
 		const tmpl8 = bool => html`<input ?disabled="${bool}" />`
 		const key8 = Symbol()
-		const input8 = tmpl8(false)(key8)
+		const [input8] = /** @type {[HTMLInputElement]} */ (tmpl8(false)(key8))
 		assertTrue(!input8.hasAttribute('disabled'), 'Should not have disabled attribute when false')
-		const input8b = tmpl8(true)(key8)
+		const [input8b] = /** @type {[HTMLInputElement]} */ (tmpl8(true)(key8))
 		assertEquals(input8, input8b, 'Should be the same elements')
 		assertTrue(
 			input8.hasAttribute('disabled'),
@@ -162,18 +204,18 @@ describe('html template function', () => {
 		const tmpl9 = bool => html`<input ?disabled="${bool} static content" />`
 		/** @type {Array<any>} */
 		const key9 = []
-		const input9 = tmpl9(false)(key9)
+		const [input9] = /** @type {[HTMLInputElement]} */ (tmpl9(false)(key9))
 		assertTrue(
 			input9.hasAttribute('disabled'),
 			'Should have disabled attribute because the value with static content is always truthy',
 		)
-		const input9b = tmpl9(true)(key9)
+		const [input9b] = /** @type {[HTMLInputElement]} */ (tmpl9(true)(key9))
 		assertEquals(input9, input9b, 'Should be the same elements')
 		assertTrue(
 			input9.hasAttribute('disabled'),
 			'Should still have disabled attribute because the value with static content is always truthy',
 		)
-		const input9c = tmpl9(false)(key9)
+		const [input9c] = /** @type {[HTMLInputElement]} */ (tmpl9(false)(key9))
 		assertEquals(input9, input9c, 'Should be the same elements')
 		assertTrue(
 			input9.hasAttribute('disabled'),
@@ -187,12 +229,12 @@ describe('html template function', () => {
 		const tmpl = value => html`<some-el .someProp=${value} .otherProp=${value + 1}></some-el>`(key)
 
 		let val = 'test value'
-		const el = tmpl(val)
+		const [el] = /** @type {[any]} */ (tmpl(val))
 		assertEquals(el.someProp, val, 'Property should be set initially')
 		assertEquals(el.otherProp, val + 1, 'Property should be set initially')
 
 		val = 'new value'
-		const el2 = tmpl(val)
+		const [el2] = tmpl(val)
 		assertEquals(el, el2, 'Should be the same elements')
 		assertEquals(el.someProp, val, 'Property should be updated after template re-run')
 		assertEquals(el.otherProp, val + 1, 'Property should be updated after template re-run')
@@ -204,11 +246,11 @@ describe('html template function', () => {
 		const tmpl = value => html`<some-el .someProp="${value}"></some-el>`(key)
 
 		let val = 'test value'
-		const el = tmpl(val)
+		const [el] = /** @type {[any]} */ (tmpl(val))
 		assertEquals(el.someProp, val, 'Property should be set initially')
 
 		val = 'new value'
-		const el2 = tmpl(val)
+		const [el2] = tmpl(val)
 		assertEquals(el, el2, 'Should be the same elements')
 		assertEquals(el.someProp, val, 'Property should be updated after template re-run')
 	})
@@ -217,7 +259,7 @@ describe('html template function', () => {
 		const key = Symbol()
 		const tmpl = () => html`<anyel .someProp="static content"></anyel>`(key)
 
-		const el = tmpl()
+		const [el] = /** @type {any} */ (tmpl())
 		assertEquals(el.someProp, 'static content', 'Property should be set from static content')
 		assertTrue(!el.hasAttribute('someprop'), 'It should not set the someprop attribute')
 		assertTrue(!el.hasAttribute('.someprop'), 'It should not set the .someprop attribute') // Lit fails this test
@@ -229,11 +271,11 @@ describe('html template function', () => {
 		const tmpl = value => html`<some-el .someProp="${value} static content"></some-el>`(key)
 
 		let val = 'test value'
-		const el = tmpl(val)
+		const [el] = /** @type {any} */ (tmpl(val))
 		assertEquals(el.someProp, val + ' static content', 'Property should be set initially')
 
 		val = 'new value'
-		const el2 = tmpl(val)
+		const [el2] = tmpl(val)
 		assertEquals(el, el2, 'Should be the same elements')
 		assertEquals(el.someProp, val + ' static content', 'Property should be updated after template re-run')
 	})
@@ -247,7 +289,7 @@ describe('html template function', () => {
 
 		/** @param {Function} handler */
 		const tmpl = handler => html`<button @click=${handler}>Click me</button>`(key)
-		const button = tmpl(handler)
+		const [button] = /** @type {[HTMLButtonElement]} */ (tmpl(handler))
 
 		// Simulate click
 		button.click()
@@ -276,7 +318,7 @@ describe('html template function', () => {
 
 		/** @param {string} handler */
 		const tmpl = handler => html`<button @click=${handler}>Click me</button>`(key)
-		const button = tmpl(handler)
+		const [button] = /** @type {[HTMLButtonElement]} */ (tmpl(handler))
 
 		// Simulate click
 		button.click()
@@ -300,7 +342,7 @@ describe('html template function', () => {
 		const key = Symbol()
 
 		const tmpl = () => html`<button @click="__clicked = true">Click me</button>`(key)
-		const button = tmpl()
+		const [button] = /** @type {[HTMLButtonElement]} */ (tmpl())
 
 		assertTrue(!button.hasAttribute('@click'), 'It should not set the @click attribute') // Lit fails this test
 
@@ -354,9 +396,9 @@ describe('html template function', () => {
 
 		// Make sure the text interpolations work while we're at it
 
-		assertEquals(nodes[0].data, a)
-		assertEquals(nodes[2].data, b)
-		assertEquals(nodes[4].data, c)
+		assertEquals(nodes[0].textContent, a)
+		assertEquals(nodes[2].textContent, b)
+		assertEquals(nodes[4].textContent, c)
 
 		// Update the same text nodes
 		a = 'one string'
@@ -364,43 +406,75 @@ describe('html template function', () => {
 		c = 'third string'
 		tmpl(a, b, c)
 
-		assertEquals(nodes[0].data, a)
-		assertEquals(nodes[2].data, b)
-		assertEquals(nodes[4].data, c)
+		assertEquals(nodes[0].textContent, a)
+		assertEquals(nodes[2].textContent, b)
+		assertEquals(nodes[4].textContent, c)
 	})
 
 	it('Custom element example', () => {
-		class MyEl extends HTMLElement {
-			value = 123
+		const key = Symbol()
 
-			template() {
-				return html` <div>value: ${this.value}</div> `
-			}
+		/** @param {number} val */
+		const tmpl = val => html`<my-test-el .value=${val}></my-test-el>`(key)[0]
 
-			connectedCallback() {
-				const div = this.template()(this)
-				this.appendChild(div)
-			}
+		const el = /** @type {MyTestEl} */ (tmpl(456))
+		assertTrue(el instanceof MyTestEl, 'Should return MyTestEl instance already upgraded')
 
-			update() {
-				this.template()(this)
-			}
-		}
-
-		customElements.define('my-test-el', MyEl)
-
-		const el = new MyEl()
 		document.body.appendChild(el)
 
-		assertTrue(el.textContent.includes('123'), 'Should show initial value')
+		assertTrue(el.textContent.includes('456'), 'Should show initial value')
 
-		el.value = 456
-		el.update()
+		tmpl(789)
 
-		assertTrue(el.textContent.includes('456'), 'Should show updated value')
-		assertTrue(!el.textContent.includes('123'), 'Should not show old value')
+		assertTrue(el.textContent.includes('789'), 'Should show updated value')
+		assertTrue(!el.textContent.includes('456'), 'Should not show old value')
 
 		el.remove()
+	})
+
+	it('Conditional branching', () => {
+		const key = Symbol()
+		let bool = false
+
+		function template() {
+			return html` <h1>${bool ? html`<span>truthy</span>` : html`<pre>falsey</pre>`}</h1> `(key)
+		}
+
+		// Initially false
+		const [h1] = /** @type {[HTMLHeadingElement]} */ (template())
+		assertTrue(h1 instanceof HTMLHeadingElement, 'Should return HTMLHeadingElement')
+		assertTrue(h1.textContent.includes('falsey'), 'Should show falsey content initially')
+
+		const pre = h1.querySelector('pre')
+		assertTrue(pre instanceof HTMLPreElement, 'Should contain pre element')
+		assertEquals(pre?.textContent, 'falsey', 'Pre should have correct content')
+
+		// Switch to true
+		bool = true
+		const [h1_2] = /** @type {[HTMLHeadingElement]} */ (template())
+
+		assertEquals(h1, h1_2, 'Should return same h1 instance')
+		assertTrue(h1.textContent.includes('truthy'), 'Should show truthy content after change')
+
+		const span = h1.querySelector('span')
+		assertTrue(span instanceof HTMLSpanElement, 'Should contain span element')
+		assertEquals(span?.textContent, 'truthy', 'Span should have correct content')
+
+		// Verify pre element is gone
+		const preAfter = h1.querySelector('pre')
+		assertTrue(preAfter === null, 'Pre element should be removed')
+
+		// Switch back to false
+		bool = false
+		template()
+
+		assertTrue(h1.textContent.includes('falsey'), 'Should show falsey content again')
+		const preBack = h1.querySelector('pre')
+		assertTrue(preBack instanceof HTMLPreElement, 'Should contain pre element again')
+
+		// Verify span element is gone
+		const spanAfter = h1.querySelector('span')
+		assertTrue(spanAfter === null, 'Span element should be removed')
 	})
 
 	it('Parser error handling', () => {
@@ -451,25 +525,280 @@ describe('html template function', () => {
 		 * @param {any} key
 		 */
 		function render(value, key) {
-			return html`
-				<div>
-					value: ${value}
-					<div>child element</div>
-				</div>
-			`(key)
+			return /** @type {[HTMLDivElement]} */ (
+				html`
+					<div>
+						value: ${value}
+						<div>child element</div>
+					</div>
+				`(key)
+			)
 		}
 
-		const div1 = render('foo', key1)
+		const [div1] = render('foo', key1)
 		assertTrue(div1.textContent.includes('foo'), 'Should contain first value')
 		assertTrue(div1.children[0].textContent === 'child element', 'Should have child element')
 
-		const div2 = render('bar', key1)
+		const [div2] = render('bar', key1)
 		assertTrue(div1.textContent.includes('bar'), 'Should update with new value')
 		assertTrue(div2.textContent.includes('bar'), 'Second call should return updated content')
 		assertTrue(div1 === div2, 'Same key should return same instance')
 
-		const div3 = render('baz', key2)
+		const [div3] = render('baz', key2)
 		assertTrue(div3 !== div1, 'Different key should return different instance')
 		assertTrue(div3.textContent.includes('baz'), 'Third instance should have its own content')
+	})
+
+	it('Nested template with its own key', () => {
+		const key = Symbol()
+
+		/** @param {string} value */
+		function innerTemplate(value) {
+			return html`<span>Inner value: ${value}</span>`(key)
+		}
+
+		/** @param {string} value */
+		function outerTemplate(value) {
+			return html` <div>Outer value: ${value} ${innerTemplate(value + ' (from inner)')}</div> `(key)
+		}
+
+		const [div] = /** @type {[HTMLDivElement]} */ (outerTemplate('test'))
+
+		assertTrue(div instanceof HTMLDivElement, 'Should return HTMLDivElement')
+		assertTrue(div.textContent.includes('Outer value: test'), 'Should contain outer interpolated value')
+		assertTrue(div.textContent.includes('Inner value: test (from inner)'), 'Should contain inner interpolated value')
+
+		// Also check that the span element was properly inserted
+		const span = div.querySelector('span')
+		assertTrue(span instanceof HTMLSpanElement, 'Should contain nested span element')
+		assertEquals(span?.textContent, 'Inner value: test (from inner)', 'Nested span should have correct content')
+
+		const [div2] = /** @type {[HTMLDivElement]} */ (outerTemplate('new value'))
+
+		assertEquals(div, div2, 'Should return same outer div instance on re-render')
+		assertTrue(div.textContent.includes('Outer value: new value'), 'Should contain updated outer interpolated value')
+		assertTrue(
+			div.textContent.includes('Inner value: new value (from inner)'),
+			'Should contain inner interpolated value',
+		)
+
+		const span2 = div2.querySelector('span')
+		assertEquals(span, span2, 'Should return same inner span instance on re-render')
+		assertEquals(span?.textContent, 'Inner value: new value (from inner)', 'Nested span should have correct content')
+	})
+
+	it('Nested template with the key implied from the outer template', () => {
+		const key = Symbol()
+
+		/** @param {string} value */
+		function innerTemplate(value) {
+			return html`<span>Inner value: ${value}</span>`
+		}
+
+		/** @param {string} value */
+		function outerTemplate(value) {
+			// Here we pass the inner template without calling it with its own key, and it should use the outer key.
+			return html` <div>Outer value: ${value} ${innerTemplate(value + ' (from inner)')}</div> `(key)
+		}
+
+		const [div] = /** @type {[HTMLDivElement]} */ (outerTemplate('test'))
+
+		assertTrue(div instanceof HTMLDivElement, 'Should return HTMLDivElement')
+		assertTrue(div.textContent.includes('Outer value: test'), 'Should contain outer interpolated value')
+		assertTrue(div.textContent.includes('Inner value: test (from inner)'), 'Should contain inner interpolated value')
+
+		// Also check that the span element was properly inserted
+		const span = div.querySelector('span')
+		assertTrue(span instanceof HTMLSpanElement, 'Should contain nested span element')
+		assertEquals(span?.textContent, 'Inner value: test (from inner)', 'Nested span should have correct content')
+
+		// Verify that re-rendering works correctly on both outer and inner
+		// templates without creating new DOM because the key didn't change.
+
+		const [div2] = /** @type {[HTMLDivElement]} */ (outerTemplate('new value'))
+
+		assertEquals(div, div2, 'Should return same outer div instance on re-render due to outer key being the same')
+		assertTrue(div.textContent.includes('Outer value: new value'), 'Should contain updated outer interpolated value')
+		assertTrue(
+			div.textContent.includes('Inner value: new value (from inner)'),
+			'Should contain updated inner interpolated value',
+		)
+
+		const span2 = div2.querySelector('span')
+		assertEquals(span, span2, 'Should return same inner span instance on re-render')
+		assertEquals(span?.textContent, 'Inner value: new value (from inner)', 'Nested span should have correct content')
+	})
+
+	it('Nested template with changing key', () => {
+		const key = Symbol()
+		let innerKey = Symbol()
+
+		/** @param {string} value */
+		function innerTemplate(value) {
+			return html`<span>Inner value: ${value}</span>`(innerKey)
+		}
+
+		/** @param {string} value */
+		function outerTemplate(value) {
+			return html` <div>Outer value: ${value} ${innerTemplate(value + ' (from inner)')}</div> `(key)
+		}
+
+		const [div] = /** @type {[HTMLDivElement]} */ (outerTemplate('test'))
+
+		assertTrue(div instanceof HTMLDivElement, 'Should return HTMLDivElement')
+		assertTrue(div.textContent.includes('Outer value: test'), 'Should contain outer interpolated value')
+		assertTrue(div.textContent.includes('Inner value: test (from inner)'), 'Should contain inner interpolated value')
+
+		// Also check that the span element was properly inserted
+		const span = div.querySelector('span')
+		assertTrue(span instanceof HTMLSpanElement, 'Should contain nested span element')
+		assertEquals(span?.textContent, 'Inner value: test (from inner)', 'Nested span should have correct content')
+
+		// Change the inner key to force a new inner template instance
+		innerKey = Symbol()
+
+		const [div2] = /** @type {[HTMLDivElement]} */ (outerTemplate('new value'))
+
+		assertEquals(div, div2, 'Should return same outer div instance on re-render')
+		assertTrue(div.textContent.includes('Outer value: new value'), 'Should contain updated outer interpolated value')
+		assertTrue(
+			div.textContent.includes('Inner value: new value (from inner)'),
+			'Should contain updated inner interpolated value',
+		)
+
+		const spans = div.querySelectorAll('span')
+		const span2 = spans[0]
+
+		// The first span should have been replaced with a new instance due to the key change
+		assertEquals(spans.length, 1, 'Should have one inner span after re-render')
+		assertTrue(span !== span2, 'Should return new inner span instance on re-render due to key change')
+
+		assertEquals(span2?.textContent, 'Inner value: new value (from inner)', 'Nested span should have correct content')
+	})
+
+	it('Nested DOM', () => {
+		const key = Symbol()
+		const span = document.createElement('span')
+
+		/** @param {string} value */
+		function outerTemplate(value) {
+			span.textContent = `Inner value: ${value} (from inner)`
+
+			// Nesting a DOM element directly instead of using html`...`
+			return html` <div>Outer value: ${value} ${span}</div> `(key)
+		}
+
+		const [div] = /** @type {[HTMLDivElement]} */ (outerTemplate('test'))
+
+		assertTrue(div instanceof HTMLDivElement, 'Should return HTMLDivElement')
+		assertTrue(div.textContent.includes('Outer value: test'), 'Should contain outer interpolated value')
+		assertTrue(div.textContent.includes('Inner value: test (from inner)'), 'Should contain inner interpolated value')
+
+		// Also check that the span element was properly inserted
+		const _span = div.querySelector('span')
+		assertEquals(_span, span, 'Should contain the same nested span element')
+		assertTrue(_span instanceof HTMLSpanElement, 'Should contain nested span element')
+		assertEquals(_span?.textContent, 'Inner value: test (from inner)', 'Nested span should have correct content')
+
+		const [div2] = /** @type {[HTMLDivElement]} */ (outerTemplate('new value'))
+
+		assertTrue(div === div2, 'Should return same outer div instance on re-render')
+		assertTrue(div.textContent.includes('Outer value: new value'), 'Should contain updated outer interpolated value')
+		assertTrue(
+			div.textContent.includes('Inner value: new value (from inner)'),
+			'Should contain updated inner interpolated value',
+		)
+
+		// Also check that the span element was properly inserted
+		const _span2 = div.querySelector('span')
+		assertEquals(_span2, span, 'Should contain the same nested span element')
+		assertTrue(_span2 instanceof HTMLSpanElement, 'Should contain nested span element')
+		assertEquals(_span2?.textContent, 'Inner value: new value (from inner)', 'Nested span should have updated content')
+	})
+
+	it('Nested templates in attributes should throw', () => {
+		const key = Symbol()
+
+		// Create inner template
+		const innerTemplate = html`<span>Inner content</span>`(key)
+
+		// Try to use nested template in an attribute - this should throw
+		let errorThrown = false
+		try {
+			const outerTemplate = html`<div class="${innerTemplate}">content</div>`
+			outerTemplate(key)
+		} catch (error) {
+			errorThrown = true
+			assertTrue(
+				/** @type {any} */ (error).message.includes('Nested templates and DOM elements are not allowed in attributes'),
+				'Should throw appropriate error message',
+			)
+		}
+
+		assertTrue(errorThrown, 'Should throw error when using nested templates in attributes')
+
+		// Also test with DOM elements
+		errorThrown = false
+		try {
+			const span = document.createElement('span')
+			const outerTemplate = html`<div class="${span}">content</div>`
+			outerTemplate(key)
+		} catch (error) {
+			errorThrown = true
+			assertTrue(
+				/** @type {any} */ (error).message.includes('Nested templates and DOM elements are not allowed in attributes'),
+				'Should throw appropriate error message',
+			)
+		}
+
+		assertTrue(errorThrown, 'Should throw error when using DOM elements in attributes')
+
+		// Also test with template functions
+		errorThrown = false
+		try {
+			const innerTemplateFunc = html`<span>Inner content</span>`
+			const outerTemplate = html`<div class="${innerTemplateFunc}">content</div>`
+			outerTemplate(key)
+		} catch (error) {
+			errorThrown = true
+			assertTrue(
+				/** @type {any} */ (error).message.includes('Nested templates and DOM elements are not allowed in attributes'),
+				'Should throw appropriate error message',
+			)
+		}
+
+		assertTrue(errorThrown, 'Should throw error when using template functions in attributes')
+	})
+
+	it('does not reconnect nested template nodes unnecessarily', () => {
+		const innerKey = Symbol()
+		let innerValue = 'black light'
+		const innerTemplate = () => html`<my-test-el .value=${innerValue}></my-test-el>`(innerKey)[0]
+
+		const outerKey = Symbol()
+		const outerTemplate = () => html` <div>Wrapped: ${innerTemplate()}</div> `(outerKey)
+
+		const [div] = /** @type {[HTMLDivElement]} */ (outerTemplate())
+		const myEl = /** @type {MyTestEl} */ (div.querySelector('my-test-el'))
+
+		document.body.appendChild(div)
+
+		assertTrue(div instanceof HTMLDivElement, 'Should return HTMLDivElement')
+		assertTrue(div.textContent.includes('Wrapped: '), 'Should contain wrapper text')
+
+		assertTrue(myEl instanceof MyTestEl, 'Should contain MyTestEl instance')
+		assertTrue(myEl?.textContent.includes('value: black light'), 'MyTestEl should have correct initial content')
+		assertEquals(myEl?.connectedCount, 1, 'MyTestEl connectedCallback should have been called only once')
+
+		innerValue = 'sun light'
+		outerTemplate()
+
+		const myEl2 = /** @type {MyTestEl} */ (div.querySelector('my-test-el'))
+		assertEquals(myEl, myEl2, 'MyTestEl instance should be the same after outer re-render')
+		assertEquals(myEl2?.textContent, 'value: sun light', 'MyTestEl should have updated content')
+		// Ensure only the test element's value was updated, but that the element was not unnecessarily re-connected
+		assertEquals(myEl2?.connectedCount, 1, 'MyTestEl connectedCallback should have not been called again')
+
+		div.remove()
 	})
 })

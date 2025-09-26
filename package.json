@@ -1,19 +1,31 @@
 {
+	"name": "tiny-html",
+	"version": "0.0.0",
+	"main": "html.js",
+	"type": "module",
+	"types": "html.d.ts",
+	"files": [
+		"html.*"
+	],
 	"scripts": {
 		"start": "five-server . --open=examples/",
-		"build": "tsc",
+		"build": "npm run clean && tsc",
 		"build:watch": "tsc --watch",
+		"clean": "rimraf --glob '{.,examples/**,test/**}/*.d.{ts,ts.map}'",
 		"typecheck": "tsc --noEmit",
 		"typecheck:watch": "tsc --noEmit --watch",
-		"test": "npm run typecheck && prettier . --check && web-test-runner",
+		"test": "prettier . --check && npm run build && web-test-runner",
 		"test:watch": "web-test-runner --watch",
 		"prettier": "prettier --write ."
 	},
 	"devDependencies": {
 		"@types/mocha": "^10.0.10",
+		"@web/dev-server-import-maps": "^0.2.1",
 		"@web/test-runner": "^0.20.2",
 		"five-server": "^0.4.4",
 		"prettier": "^3.6.2",
+		"rimraf": "^6.0.1",
+		"solid-js": "^1.9.9",
 		"typescript": "^5.9.2"
 	}
 }
