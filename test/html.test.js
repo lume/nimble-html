@@ -45,7 +45,7 @@ class MyTestEl extends HTMLElement {
 customElements.define('my-test-el', MyTestEl)
 
 describe('html template function', () => {
-	it('Basic text interpolation', () => {
+	it('handles basic text interpolation', () => {
 		const value = 'hello world'
 		const key = Symbol()
 
@@ -81,7 +81,7 @@ describe('html template function', () => {
 		testContent(p)
 	})
 
-	it('Same key returns same instance', () => {
+	it('returns same instance for same key', () => {
 		const key = Symbol()
 
 		/** @param {string} value */
@@ -99,7 +99,7 @@ describe('html template function', () => {
 		assertEquals(div2.textContent, 'second call', 'Content should be updated')
 	})
 
-	it('Different keys return different instances', () => {
+	it('returns different instances for different keys', () => {
 		const key1 = Symbol()
 		const key2 = Symbol()
 
@@ -116,7 +116,7 @@ describe('html template function', () => {
 		assertEquals(div2.textContent, 'same text', 'Second instance content')
 	})
 
-	it('Basic attribute interpolation without quotes', () => {
+	it('handles basic attribute interpolation without quotes', () => {
 		let value = 'my-class'
 		const key = Symbol()
 
@@ -131,7 +131,7 @@ describe('html template function', () => {
 		assertEquals(div.getAttribute('class'), 'new-class', 'Attribute should be updated after template re-run')
 	})
 
-	it('Basic attribute interpolation with quotes', () => {
+	it('handles basic attribute interpolation with quotes', () => {
 		const value = 'my-class'
 		const key = Symbol()
 
@@ -140,7 +140,7 @@ describe('html template function', () => {
 		assertEquals(div.getAttribute('class'), 'my-class', 'Attribute with quotes should be interpolated')
 	})
 
-	it('Mixed attribute interpolation', () => {
+	it('handles mixed attribute interpolation', () => {
 		const value = 'dynamic'
 		const key = Symbol()
 
@@ -149,7 +149,7 @@ describe('html template function', () => {
 		assertEquals(div.getAttribute('class'), 'dynamic static-class', 'Mixed attribute should work')
 	})
 
-	it('Boolean attributes', () => {
+	it('handles boolean attributes', () => {
 		const [input1] = /** @type {[HTMLInputElement]} */ (html`<input ?disabled="" />`({}))
 		assertTrue(
 			!input1.hasAttribute('disabled'),
@@ -223,7 +223,7 @@ describe('html template function', () => {
 		)
 	})
 
-	it('Property setting without quotes', () => {
+	it('handles property setting without quotes', () => {
 		const key = Symbol()
 		/** @param {string} value */
 		const tmpl = value => html`<some-el .someProp=${value} .otherProp=${value + 1}></some-el>`(key)
@@ -240,7 +240,7 @@ describe('html template function', () => {
 		assertEquals(el.otherProp, val + 1, 'Property should be updated after template re-run')
 	})
 
-	it('Property setting with quotes', () => {
+	it('handles property setting with quotes', () => {
 		const key = Symbol()
 		/** @param {string} value */
 		const tmpl = value => html`<some-el .someProp="${value}"></some-el>`(key)
@@ -255,7 +255,7 @@ describe('html template function', () => {
 		assertEquals(el.someProp, val, 'Property should be updated after template re-run')
 	})
 
-	it('Property setting with static content', () => {
+	it('handles property setting with static content', () => {
 		const key = Symbol()
 		const tmpl = () => html`<anyel .someProp="static content"></anyel>`(key)
 
@@ -265,7 +265,7 @@ describe('html template function', () => {
 		assertTrue(!el.hasAttribute('.someprop'), 'It should not set the .someprop attribute') // Lit fails this test
 	})
 
-	it('Property setting with interpolated and static content', () => {
+	it('handles property setting with interpolated and static content', () => {
 		const key = Symbol()
 		/** @param {string} value */
 		const tmpl = value => html`<some-el .someProp="${value} static content"></some-el>`(key)
@@ -280,7 +280,7 @@ describe('html template function', () => {
 		assertEquals(el.someProp, val + ' static content', 'Property should be updated after template re-run')
 	})
 
-	it('Event handler as function', () => {
+	it('handles event handler as function', () => {
 		let clicked = false
 		let clicked2 = false
 		const handler = () => (clicked = true)
@@ -309,7 +309,7 @@ describe('html template function', () => {
 
 	const global = /** @type {any} */ (globalThis)
 
-	it('Event handler as dynamic string', () => {
+	it('handles event handler as dynamic string', () => {
 		global.__clicked = false
 		global.__clicked2 = false
 		const codeString = '__clicked = true'
@@ -336,7 +336,7 @@ describe('html template function', () => {
 		assertTrue(global.__clicked2, 'Event handler2 should be called')
 	})
 
-	it('Event handler as static string', () => {
+	it('handles event handler as static string', () => {
 		global.__clicked = false
 		global.__clicked2 = false
 		const key = Symbol()
@@ -352,7 +352,7 @@ describe('html template function', () => {
 		assertTrue(global.__clicked, 'Event handler should be called')
 	})
 
-	it('Multiple elements at top level', () => {
+	it('handles multiple elements at top level', () => {
 		const key = Symbol()
 
 		// At the top level, surrounding whitespace is ignored, for convenience.
@@ -367,7 +367,7 @@ describe('html template function', () => {
 		assertTrue(nodes[1] instanceof HTMLParagraphElement, 'Second element should be p')
 	})
 
-	it('Multiple elements at top level with interpolated top-level text', () => {
+	it('handles multiple elements at top level with interpolated top-level text', () => {
 		const key = Symbol()
 
 		// At the top level, surrounding whitespace is ignored, for convenience, except for explicit text nodes.
@@ -411,7 +411,7 @@ describe('html template function', () => {
 		assertEquals(nodes[4].textContent, c)
 	})
 
-	it('Custom element example', () => {
+	it('works with custom elements', () => {
 		const key = Symbol()
 
 		/** @param {number} val */
@@ -432,7 +432,7 @@ describe('html template function', () => {
 		el.remove()
 	})
 
-	it('Conditional branching', () => {
+	it('handles conditional branching', () => {
 		const key = Symbol()
 		let bool = false
 
@@ -477,7 +477,7 @@ describe('html template function', () => {
 		assertTrue(spanAfter === null, 'Span element should be removed')
 	})
 
-	it('Parser error handling', () => {
+	it('handles parser errors', () => {
 		const key = Symbol()
 
 		// Test with malformed HTML - DOMParser in text/html mode is very forgiving,
@@ -516,7 +516,7 @@ describe('html template function', () => {
 		assertTrue(true, 'Parser error handling code exists')
 	})
 
-	it('Template identity based on source location', () => {
+	it('maintains template identity based on source location', () => {
 		const key1 = {}
 		const key2 = Symbol()
 
@@ -549,7 +549,7 @@ describe('html template function', () => {
 		assertTrue(div3.textContent.includes('baz'), 'Third instance should have its own content')
 	})
 
-	it('Nested template with its own key', () => {
+	it('handles nested template with its own key', () => {
 		const key = Symbol()
 
 		/** @param {string} value */
@@ -587,7 +587,7 @@ describe('html template function', () => {
 		assertEquals(span?.textContent, 'Inner value: new value (from inner)', 'Nested span should have correct content')
 	})
 
-	it('Nested template with the key implied from the outer template', () => {
+	it('handles nested template with the key implied from the outer template', () => {
 		const key = Symbol()
 
 		/** @param {string} value */
@@ -629,7 +629,7 @@ describe('html template function', () => {
 		assertEquals(span?.textContent, 'Inner value: new value (from inner)', 'Nested span should have correct content')
 	})
 
-	it('Nested template with changing key', () => {
+	it('handles nested template with changing key', () => {
 		const key = Symbol()
 		let innerKey = Symbol()
 
@@ -676,7 +676,7 @@ describe('html template function', () => {
 		assertEquals(span2?.textContent, 'Inner value: new value (from inner)', 'Nested span should have correct content')
 	})
 
-	it('Nested DOM', () => {
+	it('handles nested DOM elements', () => {
 		const key = Symbol()
 		const span = document.createElement('span')
 
@@ -716,7 +716,7 @@ describe('html template function', () => {
 		assertEquals(_span2?.textContent, 'Inner value: new value (from inner)', 'Nested span should have updated content')
 	})
 
-	it('Nested templates in attributes should throw', () => {
+	it('throws when using nested templates in attributes', () => {
 		const key = Symbol()
 
 		// Create inner template
