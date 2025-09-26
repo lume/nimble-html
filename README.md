@@ -9,7 +9,7 @@ A framework-agnostic `html` template tag function for writing declarative-reacti
 - **Instance management**: Unique keys create a unique DOM instances that can be updated in place
 - **Attribute and property binding**: Supports regular attributes, boolean attributes, JS properties, and event handlers
 - **Type-safe**: Written in plain JavaScript with JSDoc types for TypeScript compatibility
-- **Zero dependencies**: Lightweight implementation using only DOM APIs
+- **Zero dependencies**: Lightweight implementation using only DOM APIs, in a single file
 - **Lit-compatible syntax**: Uses familiar `html` template syntax for easy adoption
 
 ## Installation
