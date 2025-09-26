@@ -860,4 +860,119 @@ describe('html template function', () => {
 
 		div.remove()
 	})
+
+	it('optimizes inline event handlers to avoid listener churn', () => {
+		const key = Symbol()
+		let clickCount = 0
+
+		// Patch addEventListener and removeEventListener to track calls
+		let addEventListenerCallCount = 0
+		let removeEventListenerCallCount = 0
+		const originalAddEventListener = Element.prototype.addEventListener
+		const originalRemoveEventListener = Element.prototype.removeEventListener
+
+		Element.prototype.addEventListener = function (
+			/** @type {any} */ type,
+			/** @type {any} */ listener,
+			/** @type {any} */ options,
+		) {
+			addEventListenerCallCount++
+			return originalAddEventListener.call(this, type, listener, options)
+		}
+
+		Element.prototype.removeEventListener = function (
+			/** @type {any} */ type,
+			/** @type {any} */ listener,
+			/** @type {any} */ options,
+		) {
+			removeEventListenerCallCount++
+			return originalRemoveEventListener.call(this, type, listener, options)
+		}
+
+		try {
+			/** @param {Function | null} handler */
+			const template = handler => {
+				// This handler function will be different on each render, but our optimization
+				// should avoid adding/removing event listeners repeatedly
+				return html`<button @click=${handler}>Click me</button>`(key)
+			}
+
+			const [button] = /** @type {[HTMLButtonElement]} */ (template(() => (clickCount += 1)))
+			document.body.appendChild(button)
+
+			// Should have called addEventListener once for the internal handler
+			assertEquals(addEventListenerCallCount, 1, 'Should call addEventListener once for initial setup')
+			assertEquals(removeEventListenerCallCount, 0, 'Should not call removeEventListener yet')
+
+			// First click
+			button.click()
+			assertEquals(clickCount, 1, 'First click should work')
+
+			// Reset counters before re-renders
+			addEventListenerCallCount = 0
+			removeEventListenerCallCount = 0
+
+			// Re-render with different inline function
+			template(() => (clickCount += 10))
+
+			// Should not have called addEventListener or removeEventListener again
+			assertEquals(addEventListenerCallCount, 0, 'Should not call addEventListener again for different inline function')
+			assertEquals(removeEventListenerCallCount, 0, 'Should not call removeEventListener for different inline function')
+
+			// Second click should use the new handler
+			button.click()
+			assertEquals(clickCount, 11, 'Second click should use updated handler (1 + 10)')
+
+			// Re-render again with different inline function
+			template(() => (clickCount += 100))
+
+			// Still should not have called addEventListener or removeEventListener
+			assertEquals(
+				addEventListenerCallCount,
+				0,
+				'Should not call addEventListener again for second different inline function',
+			)
+			assertEquals(
+				removeEventListenerCallCount,
+				0,
+				'Should not call removeEventListener for second different inline function',
+			)
+
+			// Third click should use the newest handler
+			button.click()
+			assertEquals(clickCount, 111, 'Third click should use newest handler (11 + 100)')
+
+			// Reset counters before testing null handler
+			addEventListenerCallCount = 0
+			removeEventListenerCallCount = 0
+
+			// Set handler to null to test cleanup - should use the same button element
+			const [buttonNull] = /** @type {[HTMLButtonElement]} */ (template(null))
+			assertEquals(button, buttonNull, 'Should be the same button element')
+
+			// Should have called removeEventListener once to clean up
+			assertEquals(addEventListenerCallCount, 0, 'Should not call addEventListener when setting handler to null')
+			assertEquals(removeEventListenerCallCount, 1, 'Should call removeEventListener once when setting handler to null')
+
+			// Reset counters and try setting to null again - should not call anything due to caching
+			addEventListenerCallCount = 0
+			removeEventListenerCallCount = 0
+
+			template(null)
+
+			// Should not call removeEventListener again since cached value is already null (optimization working)
+			assertEquals(addEventListenerCallCount, 0, 'Should not call addEventListener when handler already null')
+			assertEquals(
+				removeEventListenerCallCount,
+				0,
+				'Should not call removeEventListener again when handler already null due to caching optimization',
+			)
+
+			button.remove()
+		} finally {
+			// Restore original methods
+			Element.prototype.addEventListener = originalAddEventListener
+			Element.prototype.removeEventListener = originalRemoveEventListener
+		}
+	})
 })

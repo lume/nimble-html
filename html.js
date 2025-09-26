@@ -481,28 +481,42 @@ function applyValues(sites, values, currentKey) {
 			// Only update event handler if it has changed
 			if (site.cachedValue === inputValue) continue // No change
 
-			// Remove previous event listener if it exists
-			if (site.currentHandler) {
-				element.removeEventListener(eventName, site.currentHandler)
-				site.currentHandler = undefined
-			}
-
+			// Determine the actual event listener to use
 			let eventListener
 			// Pure interpolation - pattern is ['', number, '']
 			if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number') {
 				// Pure interpolation
-				if (typeof inputValue === 'function') eventListener = /** @type {EventListener} */ (inputValue)
+				if (typeof inputValue === 'function') eventListener = inputValue
 				else if (typeof inputValue === 'string')
 					eventListener = /** @type {EventListener} */ (new Function('event', inputValue))
+				else if (inputValue == null || inputValue === '' || inputValue === false) eventListener = null
 				else throw new TypeError(`Event handler for ${eventName} must be a function or string`)
 			} else {
 				// Mixed content - treat as code string
 				const handlerCode = joinPartsWithValues(parts, values)
-				eventListener = /** @type {EventListener} */ (new Function('event', handlerCode))
+				if (handlerCode.trim() === '') eventListener = null
+				else eventListener = /** @type {EventListener} */ (new Function('event', handlerCode))
 			}
 
-			element.addEventListener(eventName, eventListener)
-			site.currentHandler = eventListener
+			// Optimized event handler management
+			if (eventListener) {
+				// We have a valid event listener
+				if (!site.internalHandler) {
+					// Create a stable wrapper function that calls the current handler
+					site.internalHandler = /** @type {EventListener} */ (event => site.currentEventListener?.(event))
+					element.addEventListener(eventName, site.internalHandler)
+				}
+				// Update the current handler reference (no DOM manipulation needed)
+				site.currentEventListener = /** @type {EventListener} */ (eventListener)
+			} else {
+				// We have a falsy event listener, remove the internal handler if it exists
+				if (site.internalHandler) {
+					element.removeEventListener(eventName, site.internalHandler)
+					site.internalHandler = undefined
+					site.currentEventListener = undefined
+				}
+			}
+
 			site.cachedValue = inputValue
 		}
 	}
@@ -547,6 +561,8 @@ function applyValues(sites, values, currentKey) {
  *   currentHandler?: EventListener,
  *   interpolationIndex?: number,
  *   insertedNodes?: (Element | Text)[],
- *   cachedValue?: unknown
+ *   cachedValue?: unknown,
+ *   internalHandler?: EventListener,
+ *   currentEventListener?: EventListener
  * }} InterpolationSite
  */
