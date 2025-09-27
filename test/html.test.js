@@ -975,4 +975,131 @@ describe('html template function', () => {
 			Element.prototype.removeEventListener = originalRemoveEventListener
 		}
 	})
+
+	it('handles arrays of template functions and nested arrays', async () => {
+		const key = Symbol()
+
+		// Test simple case first - a single template function
+		const singleTemplate = html`<li>Single item</li>`
+		const [ul0] = /** @type {[HTMLUListElement]} */ (
+			html`<ul>
+				${singleTemplate}
+			</ul>`(key)
+		)
+		assertEquals(ul0.children.length, 1, 'Single template function should work')
+		assertEquals(ul0.children[0].textContent, 'Single item', 'Single template should render correctly')
+
+		const items = ['apple', 'banana', 'cherry']
+
+		// Test template result tuples mapped from a list (each template function called with a key, like items.map(i => html`<li>${i}</li>`(uniqueKey)))
+		const [ul] = /** @type {[HTMLUListElement]} */ (
+			html`<ul>
+				${items.map(item => html`<li>${item}</li>`(Symbol()))}
+			</ul>`(key)
+		)
+		document.body.appendChild(ul)
+
+		assertEquals(ul.children.length, 3, 'Should have 3 list items')
+		assertEquals(ul.children[0].textContent, 'apple', 'First item should be "apple"')
+		assertEquals(ul.children[1].textContent, 'banana', 'Second item should be "banana"')
+		assertEquals(ul.children[2].textContent, 'cherry', 'Third item should be "cherry"')
+
+		ul.remove()
+
+		// Test template functions not called with keys, mapped from a list (like items.map(i => html`<li>${i}</li>`)).
+		const [ul2] = /** @type {[HTMLUListElement]} */ (
+			html`<ul>
+				${items.map(item => html`<li>${item}</li>`)}
+			</ul>`(key)
+		)
+
+		assertEquals(ul2.children.length, 3, 'Should have 3 list items for nested arrays')
+		assertEquals(ul2.children[0].textContent, 'apple', 'First nested item should be "apple"')
+		assertEquals(ul2.children[1].textContent, 'banana', 'Second nested item should be "banana"')
+		assertEquals(ul2.children[2].textContent, 'cherry', 'Third nested item should be "cherry"')
+
+		ul2.remove()
+
+		// Test template functions not called with keys, mapped from a list
+		// (like items.map(i => html`<li>${i}</li>`)) from a shared mapper
+		// function in two locations to ensure usages at both sites create
+		// different sets of template instances despite sharing the template
+		// source location.
+		const renderItems = () => items.map(item => html`<li>${item}</li>`)
+		const template = () =>
+			/** @type {[HTMLUListElement, HTMLUListElement]} */ (
+				html`
+					<ul>
+						${renderItems()}
+					</ul>
+					<ul>
+						${renderItems()}
+					</ul>
+				`(key)
+			)
+		const [ul3, ul4] = template()
+
+		assertEquals(ul3.children.length, 3, 'Should have 3 list items for nested arrays')
+		assertEquals(ul4.children.length, 3, 'Should have 3 list items for nested arrays')
+		assertEquals(ul3.children[0].textContent, 'apple', 'First nested item should be "apple"')
+		assertEquals(ul3.children[1].textContent, 'banana', 'Second nested item should be "banana"')
+		assertEquals(ul3.children[2].textContent, 'cherry', 'Third nested item should be "cherry"')
+		assertEquals(ul4.children[0].textContent, 'apple', 'First nested item should be "apple"')
+		assertEquals(ul4.children[1].textContent, 'banana', 'Second nested item should be "banana"')
+		assertEquals(ul4.children[2].textContent, 'cherry', 'Third nested item should be "cherry"')
+
+		// Ensure that if we re-render the template, we got no DOM mutations, using MutationObserver
+		let mutationsCount = 0
+		const observer = new MutationObserver(mutations => (mutationsCount += mutations.length))
+		observer.observe(document.body, {
+			childList: true,
+			attributes: true,
+			characterData: true,
+			subtree: true,
+			attributeOldValue: true,
+			characterDataOldValue: true,
+		})
+
+		template()
+
+		await Promise.resolve() // wait a microtask for MutationObserver to flush
+
+		assertEquals(mutationsCount, 0, 'Re-rendering nested templates should cause no DOM mutations')
+
+		observer.disconnect()
+		ul3.remove()
+
+		// Test mixed array with different types
+		const mixedArray = [
+			html`<div>Element 1</div>`(Symbol())[0], // Single DOM element
+			html`<p>Para 1</p>
+				<p>Para 2</p>`(Symbol()), // Array of DOM elements
+			html`<span>Template function</span>`, // Template function
+			'Plain text', // String
+			42, // Number
+			null, // Null (should be ignored)
+			'', // Empty string (should be ignored)
+		]
+
+		const [container] = /** @type {[HTMLDivElement]} */ (html`<div>${mixedArray}</div>`(key))
+
+		// Count actual rendered elements (excluding text nodes from null/empty strings)
+		const elements = Array.from(container.childNodes).filter(
+			node =>
+				node.nodeType === Node.ELEMENT_NODE ||
+				(node.nodeType === Node.TEXT_NODE && (node.textContent || '').trim() !== ''),
+		)
+
+		assertTrue(elements.length >= 6, 'Should have at least 6 rendered nodes')
+		assertTrue(container.querySelector('div')?.textContent === 'Element 1', 'Should contain div with "Element 1"')
+		assertTrue(container.querySelector('p')?.textContent === 'Para 1', 'Should contain paragraph with "Para 1"')
+		assertTrue(
+			container.querySelector('span')?.textContent === 'Template function',
+			'Should contain span from template function',
+		)
+		assertTrue(container.textContent.includes('Plain text'), 'Should contain plain text')
+		assertTrue(container.textContent.includes('42'), 'Should contain number as text')
+
+		container.remove()
+	})
 })

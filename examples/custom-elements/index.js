@@ -3,6 +3,19 @@ import {Base} from './Base.js'
 import './cool-counter.js'
 
 class CustomElementExample extends Base {
+	#values1 = ['a', 'b', 'c', 'd', 'e']
+
+	#values2 = [1, 2, 3, 4, 5, 10, 11, 12]
+
+	#useValues1 = true
+
+	connectedCallback() {
+		setInterval(() => {
+			this.#useValues1 = !this.#useValues1
+			this.update()
+		}, 2000)
+	}
+
 	template() {
 		return html`
 			<div>
@@ -14,6 +27,10 @@ class CustomElementExample extends Base {
 
 				<!-- Unlike Lit, this works too! -->
 				<cool-counter .value="202"></cool-counter>
+
+				<ul>
+					${(this.#useValues1 ? this.#values1 : this.#values2).map(v => html`<li>Value: ${v}</li>`)}
+				</ul>
 			</div>
 
 			<style>

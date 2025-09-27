@@ -44,7 +44,7 @@ export function html(strings, ...values) {
 		}
 
 		// Update instance with new values
-		applyValues(sites, values, key)
+		applyValues(sites, values)
 
 		return nodes
 	}
@@ -348,43 +348,103 @@ function arrayEquals(a, b) {
 	return true
 }
 
-function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {InterpolationValue} */ value) {
-	// Handle nested templates and DOM elements
-	if (value instanceof Node) {
-		const insertedNodes = site.insertedNodes
-		if (insertedNodes && arrayEquals(insertedNodes, [value])) return // No change
+/**
+ * Cache for generating stable keys for nested template functions
+ * Maps interpolation site -> array of stable keys for each index
+ * @type {WeakMap<InterpolationSite, symbol[]>}
+ */
+const siteIndexKeys = new WeakMap()
 
-		// Remove previous nodes from a different interpolation
-		if (insertedNodes) for (const node of insertedNodes) node.remove()
+/**
+ * Get a stable unique key for a template function at a specific site and index
+ * @param {InterpolationSite} site
+ * @param {number} index
+ * @returns {symbol}
+ */
+function getStableNestedKey(site, index) {
+	let indexKeys = siteIndexKeys.get(site)
+	if (!indexKeys) siteIndexKeys.set(site, (indexKeys = []))
+	let key = indexKeys[index]
+	if (!key) indexKeys[index] = key = Symbol()
+	return key
+}
 
-		// Single DOM node - insert before the text node, hide the text node
-		site.node.parentNode?.insertBefore(value, site.node)
-		site.node.textContent = '' // Hide the text node (f.e. ${bool ? html`<div></div>` : 'text'} switching from text to DOM)
-		site.insertedNodes = [/** @type {Element | Text} */ (value)]
-		site.cachedValue = value
-	} else if (Array.isArray(value) && value.length > 0 && value.every(item => item instanceof Node)) {
-		const insertedNodes = site.insertedNodes
-		if (insertedNodes && arrayEquals(insertedNodes, value)) return // No change
+/**
+ * Helper function to clear previously inserted nodes
+ * @param {InterpolationSite} site
+ */
+function clearPreviousNodes(site) {
+	if (site.insertedNodes) for (const node of site.insertedNodes) node.remove()
+}
 
-		// Remove previous nodes from a different interpolation
-		if (insertedNodes) for (const node of insertedNodes) node.remove()
+/**
+ * Helper function to insert nodes and update site state
+ * @param {InterpolationSite} site
+ * @param {(Element | Text)[]} nodes
+ * @param {InterpolationValue} originalValue
+ */
+function insertNodesAndUpdateSite(site, nodes, originalValue) {
+	clearPreviousNodes(site)
 
+	if (nodes.length > 0) {
 		// Insert all nodes before the text node
-		for (const node of value) site.node.parentNode?.insertBefore(node, site.node)
-		site.node.textContent = '' // Hide the text node (f.e. ${bool ? html`<div></div>` : 'text'} switching from text to DOM)
-		site.insertedNodes = /** @type {(Element | Text)[]} */ ([...value])
-		site.cachedValue = value
+		for (const node of nodes) site.node.parentNode?.insertBefore(node, site.node)
+		site.node.textContent = '' // Hide the text node
+		site.insertedNodes = [...nodes]
 	} else {
+		// No nodes to insert - set empty text content
+		site.node.textContent = ''
+		site.insertedNodes = undefined
+	}
+
+	site.cachedValue = originalValue
+}
+
+function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {InterpolationValue} */ value) {
+	// Handle simple text cases first (most common case)
+	if (!(value instanceof Node) && !Array.isArray(value) && typeof value !== 'function') {
+		// Simple text content - handle directly without creating extra text nodes
 		if (site.cachedValue === value) return // No change
 
-		// Remove previous nodes from a different interpolation (f.e. ${bool ? html`<div></div>` : 'text'} switching from DOM to text)
-		const insertedNodes = site.insertedNodes
-		if (insertedNodes) for (const node of insertedNodes) node.remove()
-
-		// Regular text interpolation
+		clearPreviousNodes(site)
 		site.node.textContent = String(value ?? '')
 		site.insertedNodes = undefined
 		site.cachedValue = value
+	} else {
+		// Handle complex cases that produce DOM nodes
+		// Convert single values to arrays for uniform processing
+		const itemsToProcess = Array.isArray(value) ? value : [value]
+
+		const nodes = /** @type {(Element | Text)[]} */ (
+			itemsToProcess
+				.flatMap((item, index) => {
+					// Handle template functions - call them to get their nodes
+					if (typeof item === 'function') {
+						// Each interpolation site gets its own unique identity for nested template functions.
+						// We generate a stable key combining the site identity with the array index to ensure
+						// template functions at the same site but different positions don't share cache entries,
+						// even when using the same mapper function (e.g., html`<ul>${items.map(itemMapper)}</ul>`).
+						const stableKey = getStableNestedKey(site, index)
+						const result = item(stableKey)
+						return Array.isArray(result) ? result : [result]
+					}
+					// Handle arrays (already processed template results)
+					if (Array.isArray(item)) {
+						return item.flat(1) // Flatten one level in case of nested arrays
+					}
+					// Handle single nodes or primitive values
+					return [item]
+				})
+				.map(item => {
+					if (item instanceof Node) return /** @type {Element | Text} */ (item)
+					if (item != null && item !== '') return new Text(String(item))
+					return null
+				})
+				.filter(Boolean)
+		)
+
+		if (site.insertedNodes && arrayEquals(site.insertedNodes, nodes)) return // No change
+		insertNodesAndUpdateSite(site, nodes, value)
 	}
 }
 
@@ -392,19 +452,14 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
  * Apply values to interpolation sites
  * @param {InterpolationSite[]} sites
  * @param {InterpolationValue[]} values
- * @param {TemplateKey} currentKey
  */
-function applyValues(sites, values, currentKey) {
+function applyValues(sites, values) {
 	for (const site of sites) {
 		if (site.type === 'text') {
 			// With pre-split text nodes, each text site corresponds to exactly one interpolation
 			if (site.interpolationIndex !== undefined) {
 				const value = values[site.interpolationIndex]
-
-				// If template function that needs to be called with a key, use
-				// the current template's key for the nested template
-				if (typeof value === 'function') interpolateTextSite(site, value(currentKey))
-				else interpolateTextSite(site, value)
+				interpolateTextSite(site, value)
 			}
 		} else if (site.type === 'attribute') {
 			const element = /** @type {Element} */ (site.node)
@@ -415,14 +470,8 @@ function applyValues(sites, values, currentKey) {
 			const attributeValues = parts.filter(part => typeof part === 'number').map(part => values[part])
 			if (arrayEquals(/** @type {unknown[]} */ (site.cachedValue), attributeValues)) continue // No change
 
-			if (
-				attributeValues.some(
-					value =>
-						value instanceof Node ||
-						(Array.isArray(value) && value.length > 0 && value.some(item => item instanceof Node)) ||
-						typeof value === 'function',
-				)
-			) {
+			// Check if any attribute value would produce DOM nodes - not allowed in attributes
+			if (attributeValues.some(value => value instanceof Node || Array.isArray(value) || typeof value === 'function')) {
 				throw new Error(
 					'Nested templates and DOM elements are not allowed in attributes. Use text content interpolation instead.',
 				)
