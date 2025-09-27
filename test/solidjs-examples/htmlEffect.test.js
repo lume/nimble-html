@@ -1,26 +1,37 @@
-import {createEffect, createSignal} from 'solid-js'
-import {html} from '../../html.js'
 /** @import {TemplateNodes} from '../../html.js' */
 
+// This import of solid-js currently doesn't work with web-test-runner. https://github.com/modernweb-dev/web/issues/2985
+// import {createEffect, createSignal} from 'solid-js'
+// import {html} from '../../html.js'
+
+// So instead we use dynamic import with eval to avoid WTR's default code
+// transform from messing with the imports.
+const {createEffect, createSignal} = /** @type {typeof import('solid-js')} */ (await eval('import("solid-js")'))
+const {html} = /** @type {typeof import('../../html.js')} */ (await eval('import("../../html.js")'))
+export {} // Tell TS this is a module so that top-level await ^ statements show no type error.
+
 /**
- * A helper to create an HTML template that automatically re-renders when its
- * Solid signal dependencies change.
+ * A helper to create an HTML template that automatically re-renders when Solid
+ * signal dependencies change.
  *
  * @param {() => (key: any) => TemplateNodes} fn
  * @returns {TemplateNodes}
  */
 function htmlEffect(fn) {
-	const key = Symbol('🔑')
 	/** @type {TemplateNodes} */
 	let ret
 
+	const key = Symbol('🔑')
+
+	// Re-run the given template function whenever dependencies from fn change.
 	createEffect(() => (ret = fn()(key)))
 
+	// Return the nodes for referencing. The effect will keep them updated.
 	// @ts-ignore
 	return ret
 }
 
-describe('solid.js examples', () => {
+describe('solid.js htmlEffect example', () => {
 	it('basic usage example', () => {
 		const [count, setCount] = createSignal(0)
 

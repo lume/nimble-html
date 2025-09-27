@@ -8,15 +8,21 @@
 		"html.*"
 	],
 	"scripts": {
-		"start": "five-server . --open=examples/",
+		"start": "five-server . --open=examples",
 		"build": "npm run clean && tsc",
 		"build:watch": "tsc --watch",
 		"clean": "rimraf --glob '{.,examples/**,test/**}/*.d.{ts,ts.map}'",
 		"typecheck": "tsc --noEmit",
 		"typecheck:watch": "tsc --noEmit --watch",
-		"test": "prettier . --check && npm run build && web-test-runner",
-		"test:watch": "web-test-runner --watch",
-		"prettier": "prettier --write ."
+		"test": "prettier . --check && npm run build && npm run test:all",
+		"test:all": "web-test-runner --config test/web-test-runner.all.config.mjs",
+		"test:unit": "web-test-runner --config test/web-test-runner.unit.config.mjs",
+		"test:perf": "web-test-runner --config test/web-test-runner.perf.config.mjs",
+		"test:all:watch": "npm run test:all -- --watch",
+		"test:unit:watch": "npm run test:unit -- --watch",
+		"test:perf:watch": "npm run test:perf -- --watch",
+		"lint": "prettier --check .",
+		"lint:fix": "prettier --write ."
 	},
 	"devDependencies": {
 		"@types/mocha": "^10.0.10",
