@@ -14,9 +14,9 @@ export function html(strings, ...values) {
 
 	// Get or create template entry in instance cache
 	let templateEntry = instanceCache.get(templateId)
-	if (!templateEntry) instanceCache.set(templateId, (templateEntry = {template, instances: new Map()}))
+	if (!templateEntry) instanceCache.set(templateId, (templateEntry = {template, instances: new WeakMap()}))
 
-	return function (/** @type {unknown} */ key) {
+	return function (/** @type {TemplateKey} */ key) {
 		let nodes
 		let sites
 
@@ -571,17 +571,10 @@ function applyValues(sites, values) {
 	}
 }
 
-/**
- * @typedef {readonly (Element | Text)[]} TemplateNodes
- */
-
-/**
- * @typedef {unknown} InterpolationValue
- */
-
-/**
- * @typedef {unknown} TemplateKey
- */
+/** @typedef {readonly (Element | Text)[]} TemplateNodes */
+/** @typedef {unknown} InterpolationValue */
+/** @typedef {symbol | object | function} WeakMapKey */
+/** @typedef {WeakMapKey} TemplateKey */
 
 /**
  * Holds information about a template instance's nodes and interpolation sites.
@@ -594,7 +587,7 @@ function applyValues(sites, values) {
  *
  * @typedef {{
  *   template: HTMLTemplateElement,
- *   instances: Map<TemplateKey, TemplateInstance>
+ *   instances: WeakMap<TemplateKey, TemplateInstance>
  * }} TemplateEntry
  */
 
