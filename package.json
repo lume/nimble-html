@@ -1,5 +1,5 @@
 {
-	"name": "tiny-html",
+	"name": "nimble-html",
 	"version": "0.0.0",
 	"main": "html.js",
 	"type": "module",
