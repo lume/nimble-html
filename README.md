@@ -2,6 +2,8 @@
 
 A light-weight `html` template tag function for writing declarative-reactive web apps.
 
+## At a glance
+
 ```js
 const colors = ['red', 'green', 'blue']
 const feeling = 'simplicity'
@@ -27,7 +29,7 @@ document.body.append(
 - **Type-safe**: Written in plain JavaScript with JSDoc types for TypeScript compatibility
 - **Lit-compatible syntax**: Uses familiar `html` template syntax for easy adoption
 
-# At a glance
+# A closer look
 
 ```javascript
 import {html} from 'nimble-html'
