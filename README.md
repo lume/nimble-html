@@ -27,26 +27,10 @@ document.body.append(
 - **Type-safe**: Written in plain JavaScript with JSDoc types for TypeScript compatibility
 - **Lit-compatible syntax**: Uses familiar `html` template syntax for easy adoption
 
-# Installation
-
-Simply copy `html.js` to your project, or import it directly
-from GitHub into your JS code (f.e. using the raw.githack.com proxy):
-
-```html
-<script type="module">
-  import {html} from 'https://rawcdn.githack.com/lume/nimble-html/v0.1.0/html.js'
-
-  const feeling = 'wonderfulness'
-  const [div] = html`<div>${feeling}</div>`()
-
-  document.body.append(div)
-</script>
-```
-
 # At a glance
 
 ```javascript
-import {html} from './html.js'
+import {html} from 'nimble-html'
 
 let value = 'Hello World'
 
@@ -67,6 +51,54 @@ template() // updates the DOM
 console.log(div.textContent) // "Message: Hello Webdev"
 ```
 
+# Examples
+
+- [Basic](https://rawcdn.githack.com/lume/nimble-html/c250c4f8db47d623fb4643613f1370dbac2d936f/examples/basic.html) - [source](./examples/basic.html)
+- [Custom Elements](https://rawcdn.githack.com/lume/nimble-html/c250c4f8db47d623fb4643613f1370dbac2d936f/examples/custom-elements/index.html) - [source](./examples/custom-elements/index.html)
+
+# Installation
+
+Simply copy `html.js` to your project, or import it directly
+from GitHub into your JS code (f.e. using the raw.githack.com proxy):
+
+```html
+<script type="module">
+  import {html} from 'https://rawcdn.githack.com/lume/nimble-html/v0.1.0/html.js'
+
+  const feeling = 'wonderfulness'
+  const [div] = html`<div>${feeling}</div>`()
+
+  document.body.append(div)
+</script>
+```
+
+If you want to keep your app import statements clean, define an importmap:
+
+```html
+<script type="importmap">
+  {
+    "imports": {
+      "nimble-html": "https://rawcdn.githack.com/lume/nimble-html/v0.1.0/html.js"
+    }
+  }
+</script>
+
+<script type="module">
+  import {html} from 'nimble-html'
+
+  const feeling = 'wonderfulness'
+  const [div] = html`<div>${feeling}</div>`()
+
+  document.body.append(div)
+</script>
+```
+
+If you have Node.js tooling, you can also install it via `npm`:
+
+```bash
+npm install nimble-html
+```
+
 # Key Concepts (pun intended)
 
 ## Template Identity and Keying
@@ -74,7 +106,7 @@ console.log(div.textContent) // "Message: Hello Webdev"
 _Template instances_ are formed by two things:
 
 1. **Source location** - The unique template strings array from your source code
-2. **Key** - A unique reference you provide when calling the template for identity
+2. **Key** - A unique reference you provide for instance identity when calling the template
 
 Each template instance has a unique DOM tree that can be updated in place by
 repeatedly calling the same template with the same key.
@@ -193,9 +225,9 @@ const [pre, whitespace, span, p] = html`
 You _see_ four nodes, you get four nodes.
 
 > [!Warning]
-> This may be subject to change. Perhaps it is better to preserve all whitespace
-> as-is, for consistency, while still allowing the return value to return
-> _visible_ nodes only. Feedback welcome!
+> Whitespace handling may be subject to change. Perhaps it is better to preserve
+> all whitespace as-is, for consistency, while still allowing the return value to
+> return _visible_ nodes only. Feedback welcome!
 
 ## Nested Templates
 
