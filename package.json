@@ -22,7 +22,13 @@
 		"test:unit:watch": "npm run test:unit -- --watch",
 		"test:perf:watch": "npm run test:perf -- --watch",
 		"lint": "prettier --check .",
-		"lint:fix": "prettier --write ."
+		"lint:fix": "prettier --write .",
+		"release:major": "npm version major --message 'v%s'",
+		"release:minor": "npm version minor --message 'v%s'",
+		"release:patch": "npm version patch --message 'v%s'",
+		"preversion": "npm run build && npm test",
+		"version": "git add .",
+		"postversion": "git push --follow-tags"
 	},
 	"devDependencies": {
 		"@types/mocha": "^10.0.10",
