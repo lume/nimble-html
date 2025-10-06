@@ -420,7 +420,7 @@ describe('html template function', () => {
 		const el = /** @type {MyTestEl} */ (tmpl(456))
 		assertTrue(el instanceof MyTestEl, 'Should return MyTestEl instance already upgraded')
 
-		document.body.appendChild(el)
+		document.body.append(el)
 
 		assertTrue(el.textContent.includes('456'), 'Should show initial value')
 
@@ -781,7 +781,7 @@ describe('html template function', () => {
 		const [div] = /** @type {[HTMLDivElement]} */ (outerTemplate())
 		const myEl = /** @type {MyTestEl} */ (div.querySelector('my-test-el'))
 
-		document.body.appendChild(div)
+		document.body.append(div)
 
 		assertTrue(div instanceof HTMLDivElement, 'Should return HTMLDivElement')
 		assertTrue(div.textContent.includes('Wrapped: '), 'Should contain wrapper text')
@@ -819,7 +819,7 @@ describe('html template function', () => {
 
 		// Initial render
 		const [div] = /** @type {[HTMLDivElement]} */ (template(value))
-		document.body.appendChild(div)
+		document.body.append(div)
 
 		// Set up MutationObserver to track any DOM changes
 		let mutationCount = 0
@@ -898,7 +898,7 @@ describe('html template function', () => {
 			}
 
 			const [button] = /** @type {[HTMLButtonElement]} */ (template(() => (clickCount += 1)))
-			document.body.appendChild(button)
+			document.body.append(button)
 
 			// Should have called addEventListener once for the internal handler
 			assertEquals(addEventListenerCallCount, 1, 'Should call addEventListener once for initial setup')
@@ -997,7 +997,7 @@ describe('html template function', () => {
 				${items.map(item => html`<li>${item}</li>`(Symbol()))}
 			</ul>`(key)
 		)
-		document.body.appendChild(ul)
+		document.body.append(ul)
 
 		assertEquals(ul.children.length, 3, 'Should have 3 list items')
 		assertEquals(ul.children[0].textContent, 'apple', 'First item should be "apple"')
@@ -1012,6 +1012,8 @@ describe('html template function', () => {
 				${items.map(item => html`<li>${item}</li>`)}
 			</ul>`(key)
 		)
+		document.body.append(ul2)
+		console.log(...ul2.children)
 
 		assertEquals(ul2.children.length, 3, 'Should have 3 list items for nested arrays')
 		assertEquals(ul2.children[0].textContent, 'apple', 'First nested item should be "apple"')
@@ -1038,6 +1040,7 @@ describe('html template function', () => {
 				`(key)
 			)
 		const [ul3, ul4] = template()
+		document.body.append(ul3, ul4)
 
 		assertEquals(ul3.children.length, 3, 'Should have 3 list items for nested arrays')
 		assertEquals(ul4.children.length, 3, 'Should have 3 list items for nested arrays')

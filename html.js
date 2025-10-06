@@ -10,57 +10,25 @@
  */
 export function html(strings, ...values) {
 	const template = parseTemplate(strings)
-	const templateId = strings
 
-	// Get or create template entry in instance cache
-	let templateEntry = instanceCache.get(templateId)
-	if (!templateEntry) instanceCache.set(templateId, (templateEntry = {template, instances: new WeakMap()}))
+	const useFunctionWrapper = true
 
-	return function (/** @type {TemplateKey} */ key) {
-		let nodes
-		let sites
-
-		// Check if we already have an instance for this key
-		const templateInstance = templateEntry.instances.get(key)
-		if (templateInstance) {
-			nodes = templateInstance.nodes
-			sites = templateInstance.sites
-		} else {
-			// Create a new template instance.
-			// We're using importNode instead of cloneNode to ensure that custom
-			// elements are properly upgraded immediately when cloned, to avoid
-			// users facing issues with un-upgraded elements in templates prior
-			// to users connecting the elements to the DOM (issues like a
-			// template .prop= expression setting a property before the element
-			// is upgraded, shadowing getters/setters and breaking reactivity,
-			// causing confusion and frustration).
-			const fragment = document.importNode(template.content, true) // deep clone
-
-			sites = findInterpolationSites(fragment, templateId)
-			nodes = /** @type {TemplateNodes} */ (Object.freeze(Array.from(fragment.childNodes)))
-
-			// Store both nodes and sites for future updates
-			templateEntry.instances.set(key, {nodes, sites})
+	if (useFunctionWrapper)
+		return function (key = Symbol()) {
+			template.values = values
+			return template.updateInstance(key)
 		}
-
-		// Update instance with new values
-		applyValues(sites, values)
-
-		return nodes
+	else {
+		template.values = values
+		return template.updateInstance
 	}
 }
 
 /**
  * Template cache based on template strings (source location)
- * @type {WeakMap<TemplateStringsArray, HTMLTemplateElement>}
+ * @type {WeakMap<TemplateStringsArray, Template>}
  */
 const templateCache = new WeakMap()
-
-/**
- * Instance cache based on template + key
- * @type {Map<TemplateStringsArray, TemplateEntry>}
- */
-const instanceCache = new Map()
 
 /** Unique marker for interpolation sites */
 const INTERPOLATION_MARKER = '⧙⧘'
@@ -70,12 +38,6 @@ const INTERPOLATION_REGEXP = new RegExp(`${INTERPOLATION_MARKER}(\\d+)${INTERPOL
 
 /** This regex matches . followed by a JS identifier. TODO improve to match actual JS identifiers. */
 const JS_PROP_REGEXP = /\.([A-Za-z][A-Za-z0-9]*)/g
-
-/**
- * Map to store original case for property names
- * @type {Map<TemplateStringsArray, Map<string, string>>}
- */
-const caseMap = new Map()
 
 /**
  * Parse parts array, converting alternating indices to numbers
@@ -142,128 +104,183 @@ function splitTextNodesWithInterpolation(fragment) {
 	}
 }
 
-/**
- * Create a `<template>` with interpolation markers given the template string parts.
- * @param {TemplateStringsArray} strings
- * @returns {HTMLTemplateElement} A `<template>` element with the DOM
- * representation of the HTML, with interpolation markers in place, to be cloned
- * for any "instance" of the template.
- */
-function parseTemplate(strings) {
-	let cached = templateCache.get(strings)
-	if (cached) return cached
+class Template {
+	/** @type {WeakMap<TemplateKey, TemplateInstance>} */
+	instances = new WeakMap()
+	el = document.createElement('template')
+	caseMappings = new Map()
 
-	// Join strings with interpolation markers
-	let htmlString = strings.reduce(
-		(acc, str, i) => acc + str + (i < strings.length - 1 ? `${INTERPOLATION_MARKER}${i}${INTERPOLATION_MARKER}` : ''),
-		'',
-	)
+	/**
+	 * @param {TemplateStringsArray} strings
+	 */
+	constructor(strings) {
+		// Join strings with interpolation markers
+		let htmlString = strings.reduce(
+			(acc, str, i) => acc + str + (i < strings.length - 1 ? `${INTERPOLATION_MARKER}${i}${INTERPOLATION_MARKER}` : ''),
+			'',
+		)
 
-	// Preprocessing for case sensitivity: map .someProp to .someprop and remember the original
-	const templateId = strings
-	const caseMappings = new Map()
-	let counter = 0
+		const {caseMappings, el} = this
 
-	// How the case-preserved${count} works:
-	// 1. We replace all .someProp, .otherProp, etc with .case-preserved0,
-	//    .case-preserved1, etc and store the mapping from .case-preserved0 ->
-	//    someProp, .case-preserved1 -> otherProp, etc in caseMappings.
-	// 2. Later, when processing the attributes, we can look up the original
-	//    case-sensitive property name using the placeholder.
-	// 3. This allows us to avoid issues with HTML attribute names being
-	//    case-insensitive, while still preserving the original case for JS
-	//    property names so we can set them correctly on the elements.
-	htmlString = htmlString.replace(JS_PROP_REGEXP, (_, propName) => {
-		const placeholder = `.case-preserved${counter}`
-		caseMappings.set(placeholder.slice(1), propName) // Store without the dot
-		counter++
-		return placeholder
-	})
+		// Preprocessing for case sensitivity: map .someProp to .someprop and remember the original
+		let counter = 0
 
-	caseMap.set(templateId, caseMappings)
+		// How the case-preserved${count} works:
+		// 1. We replace all .someProp, .otherProp, etc with .case-preserved0,
+		//    .case-preserved1, etc and store the mapping from .case-preserved0 ->
+		//    someProp, .case-preserved1 -> otherProp, etc in caseMappings.
+		// 2. Later, when processing the attributes, we can look up the original
+		//    case-sensitive property name using the placeholder.
+		// 3. This allows us to avoid issues with HTML attribute names being
+		//    case-insensitive, while still preserving the original case for JS
+		//    property names so we can set them correctly on the elements.
+		htmlString = htmlString.replace(JS_PROP_REGEXP, (_, propName) => {
+			const placeholder = `.case-preserved${counter}`
+			caseMappings.set(placeholder.slice(1), propName) // Store without the dot
+			counter++
+			return placeholder
+		})
 
-	// Use the standard HTML parser to parse the string into a template document
-	const template = document.createElement('template')
-	template.innerHTML = htmlString
+		// Use the standard HTML parser to parse the string into a template document
+		el.innerHTML = htmlString
 
-	// Pre-split text nodes that contain interpolation markers
-	// This is done once during template creation for better performance
-	splitTextNodesWithInterpolation(template.content)
+		// Pre-split text nodes that contain interpolation markers
+		// This is done once during template creation for better performance
+		splitTextNodesWithInterpolation(el.content)
 
-	// Remove empty whitespace-only text nodes, from the top level of the
-	// template only, for the convenience of being able to easily get references
-	// to top level nodes. This allows usage like the following for a single top
-	// level element:
-	//
-	// ```js
-	// const div = html`
-	//   <div>
-	//     ...
-	//   </div>
-	// `()
-	// ```
-	//
-	// Text nodes that are not direct children of the template (f.e. inside
-	// elements) are not removed, to preserve whitespace where it may be
-	// significant.
-	//
-	// This only removes text nodes that are entirely static whitespace. Text
-	// nodes that contain interpolation markers, or non-whitespace content, are
-	// preserved. This allows getting access to top level text nodes that may
-	// contain important content. For example:
-	//
-	// ```js
-	// const nodes = html`
-	//   ${someDynamicContent}
-	//   <div>...</div>
-	// `()
-	// const textNode = nodes[0]; // Access the dynamic text node
-	// const div = nodes[1]; // Access the div element
-	// ```
-	//
-	// If you need whitespace to be preserved, consider using explicit markers
-	// like `${' '}` for spaces at the top level, or wrapping text in elements.
-	// For example:
-	//
-	// ```js
-	// const nodes = html`
-	//   <pre>
-	//     All text inside elements is preserved, including whitespace.
-	//     ${someDynamicContent}
-	//   </pre>
-	//   ${' '/* this explicit whitespace is preserved */}
-	//   <span>...</span>
-	//   This text node without whitespace is also preserved.
-	// `()
-	//
-	// const pre = nodes[0];
-	// const textNode = nodes[1]; // This is the explicit whitespace text node
-	// const span = nodes[2];
-	// const textNode2 = nodes[3]; // This is the static text node
-	// ```
-	//
-	// This makes accessing top level nodes easy, based on the visual structure
-	// of the template.
-	for (const node of template.content.childNodes) {
-		if (node.nodeType !== Node.TEXT_NODE) continue
-		if (!(node.textContent || '').includes(INTERPOLATION_MARKER) && (node.textContent || '').trim() === '')
-			node.parentNode?.removeChild(node)
+		// Remove empty whitespace-only text nodes, from the top level of the
+		// template only, for the convenience of being able to easily get references
+		// to top level nodes. This allows usage like the following for a single top
+		// level element:
+		//
+		// ```js
+		// const div = html`
+		//   <div>
+		//     ...
+		//   </div>
+		// `()
+		// ```
+		//
+		// Text nodes that are not direct children of the template (f.e. inside
+		// elements) are not removed, to preserve whitespace where it may be
+		// significant.
+		//
+		// This only removes text nodes that are entirely static whitespace. Text
+		// nodes that contain interpolation markers, or non-whitespace content, are
+		// preserved. This allows getting access to top level text nodes that may
+		// contain important content. For example:
+		//
+		// ```js
+		// const nodes = html`
+		//   ${someDynamicContent}
+		//   <div>...</div>
+		// `()
+		// const textNode = nodes[0]; // Access the dynamic text node
+		// const div = nodes[1]; // Access the div element
+		// ```
+		//
+		// If you need whitespace to be preserved, consider using explicit markers
+		// like `${' '}` for spaces at the top level, or wrapping text in elements.
+		// For example:
+		//
+		// ```js
+		// const nodes = html`
+		//   <pre>
+		//     All text inside elements is preserved, including whitespace.
+		//     ${someDynamicContent}
+		//   </pre>
+		//   ${' '/* this explicit whitespace is preserved */}
+		//   <span>...</span>
+		//   This text node without whitespace is also preserved.
+		// `()
+		//
+		// const pre = nodes[0];
+		// const textNode = nodes[1]; // This is the explicit whitespace text node
+		// const span = nodes[2];
+		// const textNode2 = nodes[3]; // This is the static text node
+		// ```
+		//
+		// This makes accessing top level nodes easy, based on the visual structure
+		// of the template.
+		for (const node of el.content.childNodes) {
+			if (node.nodeType !== Node.TEXT_NODE) continue
+			if (!(node.textContent || '').includes(INTERPOLATION_MARKER) && (node.textContent || '').trim() === '')
+				node.parentNode?.removeChild(node)
+		}
 	}
 
-	templateCache.set(strings, template)
+	/**
+	 * @param {TemplateKey} key The key for the template instance
+	 * @returns {TemplateInstance}
+	 */
+	getInstance(key) {
+		let templateInstance = this.instances.get(key)
+
+		// Create a new instance if not cached yet
+		if (!templateInstance) {
+			// Create a new template instance.
+			// We're using importNode instead of cloneNode to ensure that custom
+			// elements are properly upgraded immediately when cloned, to avoid
+			// users facing issues with un-upgraded elements in templates prior
+			// to users connecting the elements to the DOM (issues like a
+			// template .prop= expression setting a property before the element
+			// is upgraded, shadowing getters/setters and breaking reactivity,
+			// causing confusion and frustration).
+			const fragment = document.importNode(this.el.content, true) // deep clone
+
+			const sites = findInterpolationSites(fragment, this.caseMappings)
+			const nodes = /** @type {TemplateNodes} */ (Object.freeze(Array.from(fragment.childNodes)))
+
+			templateInstance = new TemplateInstance(nodes, sites)
+
+			this.instances.set(key, templateInstance)
+		}
+
+		return templateInstance
+	}
+
+	/** @type {InterpolationValue[]} */
+	values = []
+
+	/**
+	 * Update instance with new values. This gets returned by the `html`
+	 * function for users to call with their keys.
+	 *
+	 * @param {TemplateKey=} key
+	 */
+	updateInstance = (key = Symbol()) => {
+		const templateInstance = this.getInstance(key)
+		templateInstance.applyValues(this.values)
+		return templateInstance.nodes
+	}
+}
+
+/**
+ * Create a Template containing a `<template>` with the DOM representation of
+ * the HTML for cloning into "template instances", and other data, associated
+ * with the given template strings.
+ *
+ * @param {TemplateStringsArray} strings
+ *
+ * @returns {Template} The Template instance contains a `<template>` element
+ * with the DOM representation of the HTML, with interpolation markers in place,
+ * to be cloned when we create any "instance" of the template.
+ */
+function parseTemplate(strings) {
+	let template = templateCache.get(strings)
+	if (!template) templateCache.set(strings, (template = new Template(strings)))
 	return template
 }
 
 /**
  * Find interpolation sites in template
  * @param {DocumentFragment} fragment
- * @param {TemplateStringsArray} templateId
+ * @param {Map<string, string>} caseMappings
  * @returns {InterpolationSite[]}
  */
-function findInterpolationSites(fragment, templateId) {
+function findInterpolationSites(fragment, caseMappings) {
 	/** @type {InterpolationSite[]} */
 	const sites = []
-	const caseMappings = caseMap.get(templateId) || new Map()
 	const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, null)
 
 	let node
@@ -365,7 +382,7 @@ function getStableNestedKey(site, index) {
 	let indexKeys = siteIndexKeys.get(site)
 	if (!indexKeys) siteIndexKeys.set(site, (indexKeys = []))
 	let key = indexKeys[index]
-	if (!key) indexKeys[index] = key = Symbol()
+	if (!key) indexKeys[index] = key = Symbol('nested-template-key' + index)
 	return key
 }
 
@@ -425,6 +442,7 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 						// template functions at the same site but different positions don't share cache entries,
 						// even when using the same mapper function (e.g., html`<ul>${items.map(itemMapper)}</ul>`).
 						const stableKey = getStableNestedKey(site, index)
+						console.log('calling nested template function with stable key', stableKey)
 						const result = item(stableKey)
 						return Array.isArray(result) ? result : [result]
 					}
@@ -449,124 +467,148 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 }
 
 /**
- * Apply values to interpolation sites
- * @param {InterpolationSite[]} sites
- * @param {InterpolationValue[]} values
+ * Holds information about a template instance's nodes and interpolation sites.
  */
-function applyValues(sites, values) {
-	for (const site of sites) {
-		if (site.type === 'text') {
-			// With pre-split text nodes, each text site corresponds to exactly one interpolation
-			if (site.interpolationIndex !== undefined) {
-				const value = values[site.interpolationIndex]
-				interpolateTextSite(site, value)
-			}
-		} else if (site.type === 'attribute') {
-			const element = /** @type {Element} */ (site.node)
-			const parts = site.parts || []
+class TemplateInstance {
+	nodes
+	sites
 
-			// Check for nested templates/DOM in attributes - this should throw
-			// Only check values that are actually used in this attribute's parts
-			const attributeValues = parts.filter(part => typeof part === 'number').map(part => values[part])
-			if (arrayEquals(/** @type {unknown[]} */ (site.cachedValue), attributeValues)) continue // No change
+	/**
+	 * @param {TemplateNodes} nodes The cloned nodes for this template instance
+	 * @param {InterpolationSite[]} sites The interpolation sites in the template
+	 */
+	constructor(nodes, sites) {
+		this.nodes = nodes
+		this.sites = sites
+	}
 
-			// Check if any attribute value would produce DOM nodes - not allowed in attributes
-			if (attributeValues.some(value => value instanceof Node || Array.isArray(value) || typeof value === 'function')) {
-				throw new Error(
-					'Nested templates and DOM elements are not allowed in attributes. Use text content interpolation instead.',
-				)
-			}
+	/**
+	 * Apply values to interpolation sites
+	 * @param {InterpolationValue[]} values
+	 */
+	applyValues(values) {
+		const sites = this.sites
 
-			const newAttributeValue = joinPartsWithValues(parts, values)
-			element.setAttribute(site.attributeName || '', newAttributeValue)
-			site.cachedValue = attributeValues
-		} else if (site.type === 'boolean-attribute') {
-			const element = /** @type {Element} */ (site.node)
-			const parts = site.parts || []
+		console.log('applying values to template instance', values)
 
-			let setAttribute = false
-			// Pure interpolation - pattern is ['', number, '']
-			if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number')
-				setAttribute = !!values[parts[1]]
-			// Static content - single string part
-			else if (parts.length === 1 && typeof parts[0] === 'string') setAttribute = parts[0].trim() !== ''
-			// Mixed content - always truthy (has both static and dynamic parts)
-			else setAttribute = true
-
-			if (site.cachedValue === setAttribute) continue // No change
-
-			if (setAttribute) element.setAttribute(site.attributeName || '', '')
-			else element.removeAttribute(site.attributeName || '')
-
-			site.cachedValue = setAttribute
-		} else if (site.type === 'property') {
-			const element = /** @type {Element} */ (site.node)
-			const parts = site.parts || []
-
-			let propValue
-			// Pure interpolation - pattern is ['', number, '']
-			if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number')
-				propValue = values[parts[1]]
-			// Mixed content or static content
-			else propValue = joinPartsWithValues(parts, values)
-
-			if (site.cachedValue === propValue) continue // No change
-
-			const propName = site.attributeName || ''
-			const anyElement = /** @type {any} */ (element)
-			anyElement[propName] = propValue
-			site.cachedValue = propValue
-		} else if (site.type === 'event') {
-			const element = /** @type {Element} */ (site.node)
-			const parts = site.parts || []
-			const eventName = site.attributeName || ''
-
-			// Determine the current handler value for comparison
-			let inputValue
-			if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number')
-				inputValue = values[parts[1]]
-			else inputValue = joinPartsWithValues(parts, values)
-
-			// Only update event handler if it has changed
-			if (site.cachedValue === inputValue) continue // No change
-
-			// Determine the actual event listener to use
-			let eventListener
-			// Pure interpolation - pattern is ['', number, '']
-			if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number') {
-				// Pure interpolation
-				if (typeof inputValue === 'function') eventListener = inputValue
-				else if (typeof inputValue === 'string')
-					eventListener = /** @type {EventListener} */ (new Function('event', inputValue))
-				else if (inputValue == null || inputValue === '' || inputValue === false) eventListener = null
-				else throw new TypeError(`Event handler for ${eventName} must be a function or string`)
-			} else {
-				// Mixed content - treat as code string
-				const handlerCode = joinPartsWithValues(parts, values)
-				if (handlerCode.trim() === '') eventListener = null
-				else eventListener = /** @type {EventListener} */ (new Function('event', handlerCode))
-			}
-
-			// Optimized event handler management
-			if (eventListener) {
-				// We have a valid event listener
-				if (!site.internalHandler) {
-					// Create a stable wrapper function that calls the current handler
-					site.internalHandler = /** @type {EventListener} */ (event => site.currentEventListener?.(event))
-					element.addEventListener(eventName, site.internalHandler)
+		for (const site of sites) {
+			if (site.type === 'text') {
+				console.log('interpolating text site', site)
+				// With pre-split text nodes, each text site corresponds to exactly one interpolation
+				if (site.interpolationIndex !== undefined) {
+					const value = values[site.interpolationIndex]
+					console.log('interpolating text site with value', value)
+					interpolateTextSite(site, value)
 				}
-				// Update the current handler reference (no DOM manipulation needed)
-				site.currentEventListener = /** @type {EventListener} */ (eventListener)
-			} else {
-				// We have a falsy event listener, remove the internal handler if it exists
-				if (site.internalHandler) {
-					element.removeEventListener(eventName, site.internalHandler)
-					site.internalHandler = undefined
-					site.currentEventListener = undefined
-				}
-			}
+			} else if (site.type === 'attribute') {
+				const element = /** @type {Element} */ (site.node)
+				const parts = site.parts || []
 
-			site.cachedValue = inputValue
+				// Check for nested templates/DOM in attributes - this should throw
+				// Only check values that are actually used in this attribute's parts
+				const attributeValues = parts.filter(part => typeof part === 'number').map(part => values[part])
+				if (arrayEquals(/** @type {unknown[]} */ (site.cachedValue), attributeValues)) continue // No change
+
+				// Check if any attribute value would produce DOM nodes - not allowed in attributes
+				if (
+					attributeValues.some(value => value instanceof Node || Array.isArray(value) || typeof value === 'function')
+				) {
+					throw new Error(
+						'Nested templates and DOM elements are not allowed in attributes. Use text content interpolation instead.',
+					)
+				}
+
+				const newAttributeValue = joinPartsWithValues(parts, values)
+				element.setAttribute(site.attributeName || '', newAttributeValue)
+				site.cachedValue = attributeValues
+			} else if (site.type === 'boolean-attribute') {
+				const element = /** @type {Element} */ (site.node)
+				const parts = site.parts || []
+
+				let setAttribute = false
+				// Pure interpolation - pattern is ['', number, '']
+				if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number')
+					setAttribute = !!values[parts[1]]
+				// Static content - single string part
+				else if (parts.length === 1 && typeof parts[0] === 'string') setAttribute = parts[0].trim() !== ''
+				// Mixed content - always truthy (has both static and dynamic parts)
+				else setAttribute = true
+
+				if (site.cachedValue === setAttribute) continue // No change
+
+				if (setAttribute) element.setAttribute(site.attributeName || '', '')
+				else element.removeAttribute(site.attributeName || '')
+
+				site.cachedValue = setAttribute
+			} else if (site.type === 'property') {
+				const element = /** @type {Element} */ (site.node)
+				const parts = site.parts || []
+
+				let propValue
+				// Pure interpolation - pattern is ['', number, '']
+				if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number')
+					propValue = values[parts[1]]
+				// Mixed content or static content
+				else propValue = joinPartsWithValues(parts, values)
+
+				if (site.cachedValue === propValue) continue // No change
+
+				const propName = site.attributeName || ''
+				const anyElement = /** @type {any} */ (element)
+				anyElement[propName] = propValue
+				site.cachedValue = propValue
+			} else if (site.type === 'event') {
+				const element = /** @type {Element} */ (site.node)
+				const parts = site.parts || []
+				const eventName = site.attributeName || ''
+
+				// Determine the current handler value for comparison
+				let inputValue
+				if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number')
+					inputValue = values[parts[1]]
+				else inputValue = joinPartsWithValues(parts, values)
+
+				// Only update event handler if it has changed
+				if (site.cachedValue === inputValue) continue // No change
+
+				// Determine the actual event listener to use
+				let eventListener
+				// Pure interpolation - pattern is ['', number, '']
+				if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number') {
+					// Pure interpolation
+					if (typeof inputValue === 'function') eventListener = inputValue
+					else if (typeof inputValue === 'string')
+						eventListener = /** @type {EventListener} */ (new Function('event', inputValue))
+					else if (inputValue == null || inputValue === '' || inputValue === false) eventListener = null
+					else throw new TypeError(`Event handler for ${eventName} must be a function or string`)
+				} else {
+					// Mixed content - treat as code string
+					const handlerCode = joinPartsWithValues(parts, values)
+					if (handlerCode.trim() === '') eventListener = null
+					else eventListener = /** @type {EventListener} */ (new Function('event', handlerCode))
+				}
+
+				// Optimized event handler management
+				if (eventListener) {
+					// We have a valid event listener
+					if (!site.internalHandler) {
+						// Create a stable wrapper function that calls the current handler
+						site.internalHandler = /** @type {EventListener} */ (event => site.currentEventListener?.(event))
+						element.addEventListener(eventName, site.internalHandler)
+					}
+					// Update the current handler reference (no DOM manipulation needed)
+					site.currentEventListener = /** @type {EventListener} */ (eventListener)
+				} else {
+					// We have a falsy event listener, remove the internal handler if it exists
+					if (site.internalHandler) {
+						element.removeEventListener(eventName, site.internalHandler)
+						site.internalHandler = undefined
+						site.currentEventListener = undefined
+					}
+				}
+
+				site.cachedValue = inputValue
+			}
 		}
 	}
 }
@@ -577,21 +619,6 @@ function applyValues(sites, values) {
 /** @typedef {WeakMapKey} TemplateKey */
 
 /**
- * Holds information about a template instance's nodes and interpolation sites.
- *
- * @typedef {{ nodes: TemplateNodes, sites: InterpolationSite[] }} TemplateInstance
- */
-
-/**
- * Holds information about a template instance.
- *
- * @typedef {{
- *   template: HTMLTemplateElement,
- *   instances: WeakMap<TemplateKey, TemplateInstance>
- * }} TemplateEntry
- */
-
-/**
  * Holds information about an interpolation site in the template, f.e. the
  * `${...}` in `<div>${...}</div>` or `<button .onclick=${...}>`.
  *
@@ -600,7 +627,6 @@ function applyValues(sites, values) {
  *   type: 'text'|'attribute'|'event'|'boolean-attribute'|'property',
  *   attributeName?: string,
  *   parts?: Array<string | number>,
- *   currentHandler?: EventListener,
  *   interpolationIndex?: number,
  *   insertedNodes?: (Element | Text)[],
  *   cachedValue?: unknown,
