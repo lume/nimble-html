@@ -9,6 +9,7 @@
 	],
 	"scripts": {
 		"start": "five-server . --open=examples",
+		"dev": "npm start",
 		"build": "npm run clean && tsc",
 		"build:watch": "tsc --watch",
 		"clean": "rimraf --glob '{.,examples/**,test/**}/*.d.{ts,ts.map}'",
