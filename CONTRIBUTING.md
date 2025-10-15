@@ -1,3 +1,28 @@
+This project uses:
+
+- Plain JavaScript with type definitions via JSDoc types. The source code runs as-is in any browser.
+- TypeScript for type checking and producing type declaration files to enable type checking in downstream projects.
+- `@web/test-runner` for browser-based testing
+
+Overview of commands you can run:
+
+```bash
+# This is not required for plain JS usage. It generates type declaration files only, while performing a type check.
+npm run build
+
+# Type check only
+npm run typecheck
+
+# Type check in watch mode
+npm run typecheck:watch
+
+# Run tests (includes build)
+npm test
+
+# Watch tests (no build)
+npm run test:watch
+```
+
 # Installing pre-defined dependencies
 
 Always run `npm clean-install` to install pinned-version dependencies based on

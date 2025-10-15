@@ -1,33 +1,49 @@
 # nimble-html
 
-A light-weight `html` template tag function for writing declarative-reactive web apps.
+A light-weight template tag library with `html`, `svg`, and `mathml` functions for writing declarative-reactive web apps.
 
 ## At a glance
 
 ```js
+import {html, svg, mathml} from 'nimble-html'
+
 const colors = ['red', 'green', 'blue']
 const feeling = 'simplicity'
 
-document.body.append(
-  ...html`
-    <ul .onclick=${() => console.log(feeling)}>
-      ${colors.map(c => html`<li>${c}</li>`)}
-    </ul>
-  `(),
-)
+const key = Symbol()
+
+const template = () => ...html`
+  <ul .onclick=${() => console.log(feeling)}>
+    ${colors.map(c => html`<li>${c}</li>`)}
+  </ul>
+
+  <svg width="100" height="100">
+    ${colors.map((c, i) => svg` <circle cx="50 + ${i}" cy="50 + ${i}" r="40 + ${i}" fill=${c}/> `)}
+  </svg>
+
+  <math> ${colors.map((c, i) => mathml` <mfrac> <mi>${i}</mi> <mi>${c}</mi> </mfrac> `)} </math>
+`(key),
+
+document.body.append( ...template())
+
+// Update values any time.
+colors = ['cyan', 'magenta', 'yellow', 'black']
+template() // updates the DOM
 ```
 
 # Features
 
 - **Zero dependencies**: Lightweight implementation using standard DOM APIs, in a [single small file](./html.js)
 - **Framework-agnostic**: Works with any JavaScript framework or no framework at all
+- **Multi-namespace support**: `html`, `svg`, and `mathml` template tags with proper namespace handling
 - **Declarative and reactive**: Update DOM by re-invoking templates with new values
 - **buildless**: No build step required, works in any modern browser as-is
 - **Template caching**: Templates are cached based on source location for optimal performance
 - **Instance management**: Unique keys create unique DOM instances that can be updated in place
 - **Attribute and property binding**: Supports regular attributes, boolean attributes, JS properties, and event handlers
+- **Case-sensitive bindings**: Property and event bindings preserve exact case for maximum compatibility
 - **Type-safe**: Written in plain JavaScript with JSDoc types for TypeScript compatibility
-- **Lit-compatible syntax**: Uses familiar `html` template syntax for easy adoption
+- **Lit-compatible syntax**: Uses familiar template syntax for easy adoption
 
 # A closer look
 
@@ -65,7 +81,7 @@ from GitHub into your JS code (f.e. using the raw.githack.com proxy):
 
 ```html
 <script type="module">
-  import {html} from 'https://rawcdn.githack.com/lume/nimble-html/v0.1.0/html.js'
+  import {html, svg, mathml} from 'https://rawcdn.githack.com/lume/nimble-html/v0.1.0/html.js'
 
   const feeling = 'wonderfulness'
   const [div] = html`<div>${feeling}</div>`()
@@ -86,7 +102,7 @@ If you want to keep your app import statements clean, define an importmap:
 </script>
 
 <script type="module">
-  import {html} from 'nimble-html'
+  import {html, svg, mathml} from 'nimble-html'
 
   const feeling = 'wonderfulness'
   const [div] = html`<div>${feeling}</div>`()
@@ -165,6 +181,35 @@ const elements = html`
   <button @click=${clickHandler}>Click me</button>
 `(key)
 ```
+
+### Case Sensitivity for Properties and Events
+
+Property bindings (`.prop=`) and event bindings (`@event=`) preserve exact case, allowing you to target specific JavaScript properties and events:
+
+```javascript
+const element = html`
+  <div
+    .customProp=${'value1'}     <!-- Sets element.customProp -->
+    .customprop=${'value2'}     <!-- Sets element.customprop (different property!) -->
+    @customEvent=${handler1}    <!-- Listens for 'customEvent' -->
+    @customevent=${handler2}    <!-- Listens for 'customevent' (different event!) -->
+  ></div>
+`(key)
+
+// Both properties are set independently
+console.log(element.customProp) // 'value1'
+console.log(element.customprop) // 'value2'
+
+// Both event listeners are registered independently
+element.dispatchEvent(new Event('customEvent')) // Calls handler1
+element.dispatchEvent(new Event('customevent')) // Calls handler2
+```
+
+This case sensitivity is particularly important for:
+
+- **Custom elements** with camelCase properties like `.firstName`, `.lastName`
+- **Framework integration** where exact property names matter
+- **Custom events** that may use different casing conventions
 
 ## Get Multiple Elements
 
@@ -315,6 +360,107 @@ JS property, but setting up event listeners with `add/removeEventListener()`,
 regardless if the element has JS properties that accept event handler functions
 (most custom elements in the wild do not have such event handler JS properties).
 
+## SVG and MathML Support
+
+The library provides dedicated `svg` and `mathml` template tag functions that
+create elements with proper namespaces in the absence of `<svg>` or `<math>`
+root elements:
+
+```javascript
+import {html, svg, mathml} from 'nimble-html'
+
+const key = Symbol()
+const radius = 25
+const color = 'red'
+const width = 30
+const height = 30
+
+// SVG elements are created with proper SVG namespace (without needing a wrapping <svg>)
+const [circle, rect] = svg`
+  <circle cx="50" cy="50" r=${radius} fill=${color}/>
+  <rect x="10" y="10" width=${width} height=${height} fill="blue"/>
+`(key)
+
+console.log(circle instanceof SVGCircleElement) // true
+console.log(rect instanceof SVGRectElement) // true
+
+// MathML elements are created with proper MathML namespace (without needing a wrapping <math>)
+const numerator = 'a'
+const denominator = 'b'
+const [mfrac] = mathml`
+  <mfrac>
+    <mi>${numerator}</mi>
+    <mi>${denominator}</mi>
+  </mfrac>
+`(key)
+
+console.log(mfrac.namespaceURI) // "http://www.w3.org/1998/Math/MathML"
+```
+
+## Nested Templates with Mixed Content
+
+Partial `svg` and `mathml` templates (without `<svg>` or `<math>` root elements)
+can be nested inside `html` templates to produce properly namespaced mixed
+content:
+
+```javascript
+const key = Symbol()
+const centerX = 50
+const centerY = 50
+const radius = 40
+const fillColor = 'lightblue'
+const label = 'Dynamic SVG'
+const variable = 'x'
+const exponent = 2
+
+const colors = ['deepink', 'gold', 'teal']
+
+const [article] = html`
+  <article>
+    <h1>Mixed Content Example</h1>
+
+    <section class="graphics">
+      <svg width="100" height="100">
+        ${colors.map(
+          (color, i) =>
+            svg`
+              <circle cx=${centerX + i * 10} cy=${centerY + i * 10} r=${radius + i} fill=${color}/>
+              <text x=${centerX + 5 + i} y=${centerY + 5 + i} text-anchor="middle" fill=${color}>${color}</text>
+            `,
+        )}
+      </svg>
+    </section>
+
+    <section class="math">
+      <math>
+        ${colors.map(
+          (color, i) =>
+            mathml`
+              <mrow style="font-size: 1.5em; color: ${color}; translate: ${i * 40}px ${i * 40}px;">
+                <msup>
+                  <mi>${color}</mi>
+                  <mn>${exponent}</mn>
+                </msup>
+                <mo>+</mo>
+                <mn>1</mn>
+                <mo>=</mo>
+                <mn>0</mn>
+              </mrow>
+            `,
+        )}
+      </math>
+    </section>
+  </article>
+`(key)
+
+// All elements have correct types and namespaces
+const circle = article.querySelector('circle')
+console.log(circle instanceof SVGCircleElement) // true
+
+const mrow = article.querySelector('mrow')
+console.log(mrow.namespaceURI) // "http://www.w3.org/1998/Math/MathML"
+```
+
 # Making Higher-level Frameworks
 
 It's really simple with this nimble `html` tag!
@@ -365,17 +511,27 @@ app(456)
 
 # API Reference
 
-## `html(strings, ...values)(key)`
+## Template Tag Functions
 
-The `html` tagged template string function. It is not meant to be called as a regular
-function, but as a template string tag function (calling it as a plain function
-will destroy its internal template caching and optimization).
+### `html(strings, ...values)(key)`
+
+Creates HTML elements with the HTML namespace. This is the main template function for regular HTML content.
+
+### `svg(strings, ...values)(key)`
+
+Creates SVG elements with the SVG namespace (`http://www.w3.org/2000/svg`). Use this for creating SVG content that needs to be properly recognized as SVG elements.
+
+### `mathml(strings, ...values)(key)`
+
+Creates MathML elements with the MathML namespace (`http://www.w3.org/1998/Math/MathML`). Use this for creating mathematical notation that renders properly in browsers.
 
 ```js
-const template = html`<div>${value}</div>`
+const htmlTemplate = html`<div>${value}</div>`
+const svgTemplate = svg`<circle cx="50" cy="50" r="25"/>`
+const mathTemplate = mathml`<mfrac><mi>a</mi><mi>b</mi></mfrac>`
 ```
 
-**Parameters:**
+**Parameters (all functions):**
 
 - `strings`: TemplateStringsArray - The template literal strings
 - `values`: Array of interpolation values
@@ -383,40 +539,19 @@ const template = html`<div>${value}</div>`
 
 **Returns:**
 
-- Array of the template's top-level Nodes.
+- Array of the template's top-level Nodes with proper namespace and element types.
 
-**Supported Interpolations:**
+**Supported Interpolations (all functions):**
 
 - Text content: `${value}`
 - Attributes: `attr=${value}` or `attr="${value}"`
 - Boolean attributes: `?attr=${boolean}`
-- Properties: `.prop=${value}`
-- Events: `@event=${handler}`
+- Properties: `.prop=${value}` _(case-sensitive)_
+- Events: `@event=${handler}` _(case-sensitive)_
 
 # Development
 
-This project uses:
-
-- Plain JavaScript with type definitions via JSDoc types. The source code runs as-is in any browser.
-- TypeScript for type checking and producing type declaration files to enable type checking in downstream projects.
-- `@web/test-runner` for browser-based testing
-
-```bash
-# This is not required for plain JS usage. It generates type declaration files only, while performing a type check.
-npm run build
-
-# Type check only
-npm run typecheck
-
-# Type check in watch mode
-npm run typecheck:watch
-
-# Run tests (includes build)
-npm test
-
-# Watch tests (no build)
-npm run test:watch
-```
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines.
 
 ## License
 
