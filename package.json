@@ -1,6 +1,6 @@
 {
 	"name": "nimble-html",
-	"version": "0.1.3",
+	"version": "0.1.4",
 	"main": "html.js",
 	"type": "module",
 	"types": "html.d.ts",
