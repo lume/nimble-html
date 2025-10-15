@@ -25,5 +25,8 @@ jobs:
             - name: Install dependencies
               run: npm clean-install
 
+            - name: Create declarations for library consumers
+              run: npm build
+
             - name: Run tests
               run: npm test
