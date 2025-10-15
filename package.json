@@ -31,7 +31,7 @@
 		"release:patch": "npm version patch --message 'v%s'",
 		"preversion": "npm test",
 		"version": "git add .",
-		"postversion": "git push --follow-tags"
+		"postversion": "npm publish && git push --follow-tags"
 	},
 	"devDependencies": {
 		"@types/mocha": "^10.0.10",
