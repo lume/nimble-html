@@ -1,6 +1,5 @@
 /**
- * Framework-agnostic tiny `html` template tag function for declarative DOM
- * creation and updates.
+ * A nimble `html` template tag function for declarative DOM creation and updates.
  *
  * @param {TemplateStringsArray} strings
  * @param {...InterpolationValue} values
@@ -9,7 +8,45 @@
  * values.
  */
 export function html(strings, ...values) {
-	const template = parseTemplate(strings)
+	return handleTemplateTag('html', strings, ...values)
+}
+
+/**
+ * A nimble `svg` template tag function for declarative SVG DOM creation and updates.
+ *
+ * @param {TemplateStringsArray} strings
+ * @param {...InterpolationValue} values
+ * @returns {(key: any) => TemplateNodes} A function that accepts a key for
+ * template instance identity, and returns SVG DOM nodes rendered with the given
+ * values.
+ */
+export function svg(strings, ...values) {
+	return handleTemplateTag('svg', strings, ...values)
+}
+
+/**
+ * A nimble `mathml` template tag function for declarative MathML DOM creation and updates.
+ *
+ * @param {TemplateStringsArray} strings
+ * @param {...InterpolationValue} values
+ * @returns {(key: any) => TemplateNodes} A function that accepts a key for
+ * template instance identity, and returns MathML DOM nodes rendered with the given
+ * values.
+ */
+export function mathml(strings, ...values) {
+	return handleTemplateTag('mathml', strings, ...values)
+}
+
+/**
+ * @param {TemplateMode} mode
+ * @param {TemplateStringsArray} strings
+ * @param {...InterpolationValue} values
+ * @returns {(key: any) => TemplateNodes} A function that accepts a key for
+ * template instance identity, and returns DOM nodes rendered with the given
+ * values.
+ */
+function handleTemplateTag(mode, strings, ...values) {
+	const template = parseTemplate(strings, mode)
 
 	const useFunctionWrapper = true
 
@@ -36,8 +73,10 @@ const INTERPOLATION_MARKER = '⧙⧘'
 /** RegExp for matching interpolation markers */
 const INTERPOLATION_REGEXP = new RegExp(`${INTERPOLATION_MARKER}(\\d+)${INTERPOLATION_MARKER}`)
 
-/** This regex matches . followed by a JS identifier. TODO improve to match actual JS identifiers. */
-const JS_PROP_REGEXP = /\.([A-Za-z][A-Za-z0-9]*)/g
+/** Regex for finding HTML opening/self-closing tags */
+const HTML_TAG_REGEXP = /<[^<>]*?\/?>/g
+
+const ATTRIBUTE_END_REGEXP = /[\s=\/>]/
 
 /**
  * Parse parts array, converting alternating indices to numbers
@@ -111,14 +150,20 @@ class Template {
 	caseMappings = new Map()
 
 	/**
+	 * @param {TemplateMode} mode
 	 * @param {TemplateStringsArray} strings
 	 */
-	constructor(strings) {
+	constructor(strings, mode) {
 		// Join strings with interpolation markers
 		let htmlString = strings.reduce(
 			(acc, str, i) => acc + str + (i < strings.length - 1 ? `${INTERPOLATION_MARKER}${i}${INTERPOLATION_MARKER}` : ''),
 			'',
 		)
+
+		// Wrap content in appropriate root elements for SVG and MathML modes
+		// so that the HTML parser creates elements with correct namespaces
+		if (mode === 'svg') htmlString = `<svg>${htmlString}</svg>`
+		else if (mode === 'mathml') htmlString = `<math>${htmlString}</math>`
 
 		const {caseMappings, el} = this
 
@@ -134,15 +179,66 @@ class Template {
 		// 3. This allows us to avoid issues with HTML attribute names being
 		//    case-insensitive, while still preserving the original case for JS
 		//    property names so we can set them correctly on the elements.
-		htmlString = htmlString.replace(JS_PROP_REGEXP, (_, propName) => {
-			const placeholder = `.case-preserved${counter}`
-			caseMappings.set(placeholder.slice(1), propName) // Store without the dot
-			counter++
-			return placeholder
+
+		// Scan for HTML tags and process .property attributes within each tag
+		htmlString = htmlString.replace(HTML_TAG_REGEXP, tagMatch => {
+			// Parse the tag content more carefully to avoid matching dots inside quoted attribute values
+			const parts = []
+			let lastIndex = 0
+			let inQuotes = false
+			let quoteChar = ''
+			let i = 0
+
+			while (i < tagMatch.length) {
+				const char = tagMatch[i]
+
+				if (!inQuotes && (char === '"' || char === "'")) {
+					inQuotes = true
+					quoteChar = char
+				} else if (inQuotes && char === quoteChar) {
+					inQuotes = false
+					quoteChar = ''
+				} else if (!inQuotes && (char === '.' || char === '@') && i > 0 && /\s/.test(tagMatch[i - 1])) {
+					// Found a dot or @ that's not inside quotes and is preceded by whitespace (attribute name)
+					// Scan forward to find the end of the attribute name
+					let attrEnd = i + 1
+					while (attrEnd < tagMatch.length && !ATTRIBUTE_END_REGEXP.test(tagMatch[attrEnd])) attrEnd++
+
+					if (attrEnd > i + 1) {
+						// We found at least one character after the dot/at symbol
+						const attrName = tagMatch.slice(i + 1, attrEnd) // Extract attribute name without the prefix
+						const placeholder = `${char}case-preserved${counter}`
+						caseMappings.set(placeholder.slice(1), attrName)
+						counter++
+
+						// Add the part before this replacement
+						parts.push(tagMatch.slice(lastIndex, i))
+						// Add the placeholder
+						parts.push(placeholder)
+						// Update tracking
+						lastIndex = attrEnd
+						i = attrEnd - 1 // -1 because the loop will increment
+					}
+				}
+				i++
+			}
+
+			// Add the remaining part
+			parts.push(tagMatch.slice(lastIndex))
+
+			return parts.join('')
 		})
 
 		// Use the standard HTML parser to parse the string into a template document
 		el.innerHTML = htmlString
+
+		// For SVG and MathML templates, unwrap the content from the wrapper
+		// element that was added during parsing, and remove the wrapper, to
+		// ensure proper namespace handling.
+		if (mode === 'svg' || mode === 'mathml') {
+			const wrapperElement = /** @type {Element} */ (el.content.firstElementChild)
+			wrapperElement.replaceWith(...wrapperElement.childNodes)
+		}
 
 		// Pre-split text nodes that contain interpolation markers
 		// This is done once during template creation for better performance
@@ -205,7 +301,7 @@ class Template {
 		for (const node of el.content.childNodes) {
 			if (node.nodeType !== Node.TEXT_NODE) continue
 			if (!(node.textContent || '').includes(INTERPOLATION_MARKER) && (node.textContent || '').trim() === '')
-				node.parentNode?.removeChild(node)
+				node.remove()
 		}
 	}
 
@@ -260,15 +356,16 @@ class Template {
  * the HTML for cloning into "template instances", and other data, associated
  * with the given template strings.
  *
+ * @param {TemplateMode} mode
  * @param {TemplateStringsArray} strings
  *
  * @returns {Template} The Template instance contains a `<template>` element
  * with the DOM representation of the HTML, with interpolation markers in place,
  * to be cloned when we create any "instance" of the template.
  */
-function parseTemplate(strings) {
+function parseTemplate(strings, mode) {
 	let template = templateCache.get(strings)
-	if (!template) templateCache.set(strings, (template = new Template(strings)))
+	if (!template) templateCache.set(strings, (template = new Template(strings, mode)))
 	return template
 }
 
@@ -335,7 +432,8 @@ function findInterpolationSites(fragment, caseMappings) {
 						processedName = caseMappings.get(placeholder) || placeholder
 					} else if (name.startsWith('@')) {
 						type = 'event'
-						processedName = name.slice(1) // Remove the at symbol
+						const placeholder = name.slice(1) // Remove the at symbol
+						processedName = caseMappings.get(placeholder) || placeholder
 					}
 
 					sites.push({node: element, type, attributeName: processedName, parts: parsedParts})
@@ -442,7 +540,6 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 						// template functions at the same site but different positions don't share cache entries,
 						// even when using the same mapper function (e.g., html`<ul>${items.map(itemMapper)}</ul>`).
 						const stableKey = getStableNestedKey(site, index)
-						console.log('calling nested template function with stable key', stableKey)
 						const result = item(stableKey)
 						return Array.isArray(result) ? result : [result]
 					}
@@ -489,15 +586,11 @@ class TemplateInstance {
 	applyValues(values) {
 		const sites = this.sites
 
-		console.log('applying values to template instance', values)
-
 		for (const site of sites) {
 			if (site.type === 'text') {
-				console.log('interpolating text site', site)
 				// With pre-split text nodes, each text site corresponds to exactly one interpolation
 				if (site.interpolationIndex !== undefined) {
 					const value = values[site.interpolationIndex]
-					console.log('interpolating text site with value', value)
 					interpolateTextSite(site, value)
 				}
 			} else if (site.type === 'attribute') {
@@ -634,3 +727,5 @@ class TemplateInstance {
  *   currentEventListener?: EventListener
  * }} InterpolationSite
  */
+
+/** @typedef { 'html' | 'svg' | 'mathml'} TemplateMode */
