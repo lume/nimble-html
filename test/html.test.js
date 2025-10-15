@@ -1,4 +1,4 @@
-import {html} from '../html.js'
+import {html, svg, mathml} from '../html.js'
 
 /**
  * @param {any} actual
@@ -1104,5 +1104,484 @@ describe('html template function', () => {
 		assertTrue(container.textContent.includes('42'), 'Should contain number as text')
 
 		container.remove()
+	})
+
+	it('handles case-sensitive property names', () => {
+		const key = Symbol()
+		let value = 'test'
+
+		// Create element with both .customprop and .customProp bindings
+		const tmpl = () => html`<div .customprop=${value + '1'} .customProp=${value + '2'}></div>`(key)
+
+		const [el] = /** @type {[any]} */ (tmpl())
+
+		// Should set two different JS properties (JS properties are case sensitive)
+		assertEquals(el.customprop, 'test1', 'Should set customprop (lowercase) property')
+		assertEquals(el.customProp, 'test2', 'Should set customProp (camelCase) property')
+
+		// Update value and verify both properties update independently
+		value = 'updated'
+		tmpl()
+		assertEquals(el.customprop, 'updated1', 'Should update customprop property')
+		assertEquals(el.customProp, 'updated2', 'Should update customProp property')
+	})
+
+	it('handles case-sensitive event names', () => {
+		const key = Symbol()
+		/** @type {string[]} */
+		let eventsCalled = []
+
+		const someeventHandler = () => eventsCalled.push('someevent')
+		const someEventHandler = () => eventsCalled.push('someEvent')
+
+		// Create element with both @someevent and @someEvent bindings
+		const tmpl = () => html`<button @someevent=${someeventHandler} @someEvent=${someEventHandler}>Click</button>`(key)
+
+		const [button] = /** @type {[HTMLButtonElement]} */ (tmpl())
+
+		// Dispatch both event types
+		button.dispatchEvent(new Event('someevent'))
+		button.dispatchEvent(new Event('someEvent'))
+
+		assertEquals(eventsCalled.length, 2, 'Should handle two different events')
+		assertEquals(eventsCalled[0], 'someevent', 'Should call someevent handler')
+		assertEquals(eventsCalled[1], 'someEvent', 'Should call someEvent handler')
+	})
+
+	it(`properly detects case-sensitive property bindings in attribute names,
+		and not erroenously in attribute values or text content`, () => {
+		const key = Symbol()
+		let value = 'propValue'
+
+		const [div] = /** @type {[HTMLDivElement & { someProp: string }]} */ (
+			html`<div data-attr=".someProp=${value}" title="This is a .someProp=${value} test" .someProp=${value}>
+				Text with .someProp=${value} inside
+			</div>`(key)
+		)
+
+		// Should set the property correctly
+		assertEquals(div.someProp, 'propValue', 'Should set someProp property correctly')
+
+		// But should not set any attributes or text content with the property binding syntax
+		assertEquals(div.getAttribute('data-attr'), '.someProp=propValue', 'data-attr should contain literal text')
+		assertEquals(div.getAttribute('title'), 'This is a .someProp=propValue test', 'title should contain literal text')
+		assertTrue(
+			div.textContent?.includes('Text with .someProp=propValue inside'),
+			'Text content should contain literal text',
+		)
+	})
+
+	it('handles property names with non-identifier characters', () => {
+		const key = Symbol()
+
+		// Test numeric property name
+		const [div1] = /** @type {[HTMLDivElement & { '123': string }]} */ (html`<div .123=${'foo'}></div>`(key))
+		assertEquals(div1['123'], 'foo', 'Should set numeric property name')
+
+		// Test property name with special characters
+		const [div2] = /** @type {[HTMLDivElement & { '#@!': string }]} */ (html`<div .#@!=${'blah'}></div>`(key))
+		assertEquals(div2['#@!'], 'blah', 'Should set property name with special characters')
+
+		// Test property name with mixed characters
+		const [div3] = /** @type {[HTMLDivElement & { 'my-custom_prop.#123': string }]} */ (
+			html`<div .my-custom_prop.#123=${'test'}></div>`(key)
+		)
+		assertEquals(div3['my-custom_prop.#123'], 'test', 'Should set property name with mixed characters')
+	})
+
+	it('handles event names with non-identifier characters', () => {
+		const key = Symbol()
+		/** @type {string[]} */
+		let eventsCalled = []
+
+		// Test numeric event name
+		const [div1] = /** @type {[HTMLDivElement]} */ (html`<div @123=${() => eventsCalled.push('123')}></div>`(key))
+		div1.dispatchEvent(new Event('123'))
+		assertEquals(eventsCalled[0], '123', 'Should handle numeric event name')
+
+		// Test event name with special characters
+		const [div2] = /** @type {[HTMLDivElement]} */ (html`<div @$#@!=${() => eventsCalled.push('$#@!')}></div>`(key))
+		div2.dispatchEvent(new Event('$#@!'))
+		assertEquals(eventsCalled[1], '$#@!', 'Should handle event name with special characters')
+
+		// Test event name with mixed characters
+		const [div3] = /** @type {[HTMLDivElement]} */ (
+			html`<div @my-custom_event.#123=${() => eventsCalled.push('my-custom_event.#123')}></div>`(key)
+		)
+		div3.dispatchEvent(new Event('my-custom_event.#123'))
+		assertEquals(eventsCalled[2], 'my-custom_event.#123', 'Should handle event name with mixed characters')
+	})
+})
+
+describe('svg template function', () => {
+	it('creates proper SVG elements', () => {
+		const key = Symbol()
+
+		const [circle, rect] = /** @type {[SVGCircleElement, SVGRectElement]} */ (
+			svg`<circle cx="50" cy="50" r="25" fill="red"/>
+				<rect x="10" y="10" width="30" height="30" fill="blue"/>`(key)
+		)
+
+		assertTrue(circle instanceof SVGCircleElement, 'Should create SVGCircleElement')
+		assertTrue(rect instanceof SVGRectElement, 'Should create SVGRectElement')
+		assertEquals(circle.getAttribute('cx'), '50', 'Circle should have correct cx attribute')
+		assertEquals(rect.getAttribute('width'), '30', 'Rect should have correct width attribute')
+	})
+
+	it('works with nested SVG templates inside HTML templates', () => {
+		const key = Symbol()
+
+		const [div] = /** @type {[HTMLDivElement]} */ (
+			html`<div>
+				<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+					${svg`<circle cx="50" cy="50" r="25" fill="green"/>
+						<line x1="0" y1="0" x2="100" y2="100" stroke="black"/>`(Symbol())}
+				</svg>
+			</div>`(key)
+		)
+
+		const svgElement = div.querySelector('svg')
+		const circle = div.querySelector('circle')
+		const line = div.querySelector('line')
+
+		assertTrue(svgElement instanceof SVGSVGElement, 'Should contain SVG element')
+		assertTrue(circle instanceof SVGCircleElement, 'Should contain SVGCircleElement')
+		assertTrue(line instanceof SVGLineElement, 'Should contain SVGLineElement')
+		assertEquals(circle?.getAttribute('fill'), 'green', 'Circle should have correct fill')
+		assertEquals(line?.getAttribute('stroke'), 'black', 'Line should have correct stroke')
+	})
+
+	it('handles SVG attribute interpolation', () => {
+		const key = Symbol()
+		let radius = 10
+		let color = 'purple'
+
+		const template = () => svg`<circle cx="50" cy="50" r="${radius}" fill="${color}"/>`(key)
+
+		const [circle] = /** @type {[SVGCircleElement]} */ (template())
+
+		assertEquals(circle.getAttribute('r'), '10', 'Should have initial radius')
+		assertEquals(circle.getAttribute('fill'), 'purple', 'Should have initial color')
+
+		radius = 20
+		color = 'orange'
+		template()
+
+		assertEquals(circle.getAttribute('r'), '20', 'Should update radius')
+		assertEquals(circle.getAttribute('fill'), 'orange', 'Should update color')
+	})
+
+	it('handles SVG property setting', () => {
+		const key = Symbol()
+		let value = 'test-value'
+
+		const template = () => svg`<circle cx="50" cy="50" r="25" .customProp="${value}"/>`(key)
+
+		const [circle] = /** @type {[any]} */ (template())
+
+		assertEquals(circle.customProp, 'test-value', 'Should set custom property')
+
+		value = 'updated-value'
+		template()
+
+		assertEquals(circle.customProp, 'updated-value', 'Should update custom property')
+	})
+
+	it('handles multiple SVG elements with different types', () => {
+		const key = Symbol()
+
+		const elements = svg`
+			<g>
+				<circle cx="25" cy="25" r="20"/>
+				<rect x="0" y="0" width="50" height="50"/>
+				<path d="M10 10 L40 40"/>
+				<ellipse cx="25" cy="25" rx="15" ry="10"/>
+				<polygon points="10,10 40,10 25,40"/>
+			</g>
+		`(key)
+
+		const [g] = /** @type {[SVGGElement]} */ (elements)
+		assertTrue(g instanceof SVGGElement, 'Should create SVG group element')
+
+		const circle = g.querySelector('circle')
+		const rect = g.querySelector('rect')
+		const path = g.querySelector('path')
+		const ellipse = g.querySelector('ellipse')
+		const polygon = g.querySelector('polygon')
+
+		assertTrue(circle instanceof SVGCircleElement, 'Should contain SVGCircleElement')
+		assertTrue(rect instanceof SVGRectElement, 'Should contain SVGRectElement')
+		assertTrue(path instanceof SVGPathElement, 'Should contain SVGPathElement')
+		assertTrue(ellipse instanceof SVGEllipseElement, 'Should contain SVGEllipseElement')
+		assertTrue(polygon instanceof SVGPolygonElement, 'Should contain SVGPolygonElement')
+	})
+
+	it('handles boolean attributes in SVG', () => {
+		const key = Symbol()
+		let shouldShow = true
+
+		const template = () => svg`<circle cx="50" cy="50" r="25" ?hidden=${!shouldShow} fill="red"/>`(key)
+
+		const [circle] = /** @type {[SVGCircleElement]} */ (template())
+
+		assertEquals(circle.hasAttribute('hidden'), false, 'Should not have hidden attribute when shouldShow is true')
+
+		shouldShow = false
+		template()
+
+		assertEquals(circle.hasAttribute('hidden'), true, 'Should have hidden attribute when shouldShow is false')
+	})
+
+	it('handles event handlers case-sensitive event names in SVG', () => {
+		const key = Symbol()
+		/** @type {string[]} */
+		let eventsCalled = []
+
+		const someeventHandler = () => eventsCalled.push('someevent')
+		const someEventHandler = () => eventsCalled.push('someEvent')
+
+		const template = () =>
+			svg`<circle cx="50" cy="50" r="25" @someevent=${someeventHandler} @someEvent=${someEventHandler} fill="red"/>`(
+				key,
+			)
+
+		const [circle] = /** @type {[SVGCircleElement]} */ (template())
+
+		// Dispatch both event types
+		circle.dispatchEvent(new Event('someevent'))
+		circle.dispatchEvent(new Event('someEvent'))
+
+		assertEquals(eventsCalled.length, 2, 'Should handle two different events in SVG')
+		assertEquals(eventsCalled[0], 'someevent', 'Should call someevent handler')
+		assertEquals(eventsCalled[1], 'someEvent', 'Should call someEvent handler')
+	})
+})
+
+describe('math template function', () => {
+	it('creates MathML elements', () => {
+		const key = Symbol()
+
+		const [mfrac] = /** @type {[Element]} */ (
+			mathml`<mfrac>
+				<mi>x</mi>
+				<mi>y</mi>
+			</mfrac>`(key)
+		)
+
+		assertEquals(mfrac.tagName.toLowerCase(), 'mfrac', 'Should create mfrac element')
+		assertEquals(mfrac.namespaceURI, 'http://www.w3.org/1998/Math/MathML', 'Should have MathML namespace')
+
+		const numerator = mfrac.querySelector('mi:first-child')
+		const denominator = mfrac.querySelector('mi:last-child')
+
+		assertTrue(numerator instanceof MathMLElement, 'Should contain numerator')
+		assertTrue(denominator instanceof MathMLElement, 'Should contain denominator')
+		assertEquals(numerator?.textContent, 'x', 'Numerator should have correct content')
+		assertEquals(
+			numerator?.namespaceURI,
+			'http://www.w3.org/1998/Math/MathML',
+			'Numerator should have MathML namespace',
+		)
+		assertEquals(denominator?.textContent, 'y', 'Denominator should have correct content')
+		assertEquals(
+			denominator?.namespaceURI,
+			'http://www.w3.org/1998/Math/MathML',
+			'Denominator should have MathML namespace',
+		)
+	})
+
+	it('works with nested MathML templates inside HTML templates', () => {
+		const key = Symbol()
+
+		const [div] = /** @type {[HTMLDivElement]} */ (
+			html`<div>
+				<p>Equation:</p>
+				<math xmlns="http://www.w3.org/1998/Math/MathML">
+					${mathml`<mrow>
+						<mi>x</mi>
+						<mo>=</mo>
+						<mfrac>
+							<mi>a</mi>
+							<mi>b</mi>
+						</mfrac>
+					</mrow>`(Symbol())}
+				</math>
+			</div>`(key)
+		)
+
+		const mathElement = div.querySelector('math')
+		const mrow = div.querySelector('mrow')
+		const mfrac = div.querySelector('mfrac')
+		const mi_x = div.querySelector('mi')
+
+		assertTrue(mathElement instanceof MathMLElement, 'Should contain math element')
+		assertTrue(mrow instanceof MathMLElement, 'Should contain mrow element')
+		assertTrue(mfrac instanceof MathMLElement, 'Should contain mfrac element')
+		assertTrue(mi_x instanceof MathMLElement, 'Should contain mi element')
+		assertEquals(mi_x?.textContent, 'x', 'Should have correct variable content')
+		assertEquals(mi_x?.namespaceURI, 'http://www.w3.org/1998/Math/MathML', 'Should have MathML namespace')
+	})
+
+	it('handles MathML attribute interpolation', () => {
+		const key = Symbol()
+		let mathvariant = 'italic'
+
+		const template = () => mathml`<mi mathvariant="${mathvariant}">x</mi>`(key)
+
+		const [mi] = /** @type {[Element]} */ (template())
+
+		assertEquals(mi.getAttribute('mathvariant'), 'italic', 'Should have initial mathvariant')
+
+		mathvariant = 'bold'
+		template()
+
+		assertEquals(mi.getAttribute('mathvariant'), 'bold', 'Should update mathvariant')
+	})
+
+	it('handles multiple top-level MathML elements', () => {
+		const key = Symbol()
+
+		const elements = mathml`
+			<mi>x</mi>
+			<mo>+</mo>
+			<mi>y</mi>
+			<mo>=</mo>
+			<mi>z</mi>
+		`(key)
+
+		assertEquals(elements.length, 5, 'Should return 5 elements')
+
+		// Check that all elements have the correct MathML namespace
+		for (const el of elements)
+			if (el instanceof MathMLElement)
+				assertEquals(el.namespaceURI, 'http://www.w3.org/1998/Math/MathML', 'Should have MathML namespace')
+	})
+
+	it('handles boolean attributes in MathML', () => {
+		const key = Symbol()
+		let displayStyle = true
+
+		const template = () => mathml`<mstyle ?displaystyle=${displayStyle}><mi>x</mi></mstyle>`(key)
+
+		const [mstyle] = /** @type {[Element]} */ (template())
+
+		assertEquals(
+			mstyle.hasAttribute('displaystyle'),
+			true,
+			'Should have displaystyle attribute when displayStyle is true',
+		)
+
+		displayStyle = false
+		template()
+
+		assertEquals(
+			mstyle.hasAttribute('displaystyle'),
+			false,
+			'Should not have displaystyle attribute when displayStyle is false',
+		)
+	})
+
+	it('handles event handlers case-sensitive event names in MathML', () => {
+		const key = Symbol()
+		/** @type {string[]} */
+		let eventsCalled = []
+
+		const someeventHandler = () => eventsCalled.push('someevent')
+		const someEventHandler = () => eventsCalled.push('someEvent')
+
+		const template = () => mathml`<mi @someevent=${someeventHandler} @someEvent=${someEventHandler}>x</mi>`(key)
+
+		const [mi] = /** @type {[Element]} */ (template())
+
+		// Dispatch both event types
+		mi.dispatchEvent(new Event('someevent'))
+		mi.dispatchEvent(new Event('someEvent'))
+
+		assertEquals(eventsCalled.length, 2, 'Should handle two different events in MathML')
+		assertEquals(eventsCalled[0], 'someevent', 'Should call someevent handler')
+		assertEquals(eventsCalled[1], 'someEvent', 'Should call someEvent handler')
+	})
+})
+
+describe('template function interoperability', () => {
+	it('allows mixing different template types in outer html templates', () => {
+		const key = Symbol()
+
+		const [article] = /** @type {[HTMLElement]} */ (
+			html`<article>
+				<h1>Mixed Content Example</h1>
+
+				<section class="graphics">
+					<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+						${svg`<circle cx="50" cy="50" r="40" fill="lightblue"/>
+							<text x="50" y="55" text-anchor="middle">SVG</text>`(Symbol())}
+					</svg>
+				</section>
+
+				<section class="math">
+					<math xmlns="http://www.w3.org/1998/Math/MathML">
+						${mathml`<mrow>
+							<msup>
+								<mi>e</mi>
+								<mrow>
+									<mi>i</mi>
+									<mi>π</mi>
+								</mrow>
+							</msup>
+							<mo>+</mo>
+							<mn>1</mn>
+							<mo>=</mo>
+							<mn>0</mn>
+						</mrow>`(Symbol())}
+					</math>
+				</section>
+			</article>`(key)
+		)
+
+		// Verify HTML structure
+		assertTrue(article instanceof HTMLElement, 'Should create HTML article')
+		assertEquals(article.querySelectorAll('section').length, 2, 'Should have 2 sections')
+
+		// Verify SVG content
+		const circle = article.querySelector('circle')
+		const svgText = article.querySelector('text')
+		assertTrue(circle instanceof SVGCircleElement, 'Should contain SVG circle')
+		assertTrue(svgText instanceof SVGTextElement, 'Should contain SVG text')
+		assertEquals(svgText?.textContent, 'SVG', 'SVG text should have correct content')
+
+		// Verify MathML content
+		const mrow = article.querySelector('mrow')
+		const msup = article.querySelector('msup')
+		assertTrue(mrow !== null, 'Should contain MathML mrow')
+		assertTrue(msup !== null, 'Should contain MathML msup')
+		assertEquals(msup?.namespaceURI, 'http://www.w3.org/1998/Math/MathML', 'Should have MathML namespace')
+	})
+
+	it('handles nested templates with dynamic updates', () => {
+		const key = Symbol()
+		let circleRadius = 20
+		let circleColor = 'red'
+
+		const template = () =>
+			html`<div>
+				<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+					${svg`<circle cx="50" cy="50" r="${circleRadius}" fill="${circleColor}"/>`(Symbol())}
+				</svg>
+			</div>`(key)
+
+		const [div] = /** @type {[HTMLDivElement]} */ (template())
+		let circle = div.querySelector('circle')
+
+		assertEquals(circle?.getAttribute('r'), '20', 'Should have initial radius')
+		assertEquals(circle?.getAttribute('fill'), 'red', 'Should have initial color')
+
+		// Update values
+		circleRadius = 30
+		circleColor = 'blue'
+		template()
+
+		circle = div.querySelector('circle')
+		assertEquals(circle?.getAttribute('r'), '30', 'Should update radius')
+		assertEquals(circle?.getAttribute('fill'), 'blue', 'Should update color')
 	})
 })
