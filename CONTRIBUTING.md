@@ -4,7 +4,12 @@ This project uses:
 - TypeScript for type checking and producing type declaration files to enable type checking in downstream projects.
 - `@web/test-runner` for browser-based testing
 
-Overview of commands you can run:
+This keeps the code easy to manage and consume: no build is required to use the
+code in a browser, and type checking is optional for consumers, although many
+IDEs provide some type checking and intellisense for plain JS (with JSDoc types)
+out of the box with zero config.
+
+# Commands overview
 
 ```bash
 # This is not required for plain JS usage. It generates type declaration files only, while performing a type check.
@@ -81,29 +86,3 @@ reference, using `describe` and `it` functions to describe unit tests.
   `parentElement.insertBefore(childElement, parentElement.firstChild)`.
 - Always prefer `element.replaceWith(newElement)` instead of
   `element.parentNode.replaceChild(newElement, element)`.
-
-# AI only:
-
-## Never do the following:
-
-- Never create tests in files that you run with `node`. Our code is for
-  browsers, so always run tests using `npm test` which ensures our tests run in a
-  headless browser. The output is logged back to terminal.
-
-## Responding to prompts
-
-After every prompt, always provide at least three proposals for a solution, with
-pros and cons, and stop to allow the user to select the desired direction.
-
-A conversation should be like this:
-
-1. User: Let's do [thing to do].
-2. AI: Here are three ways we could do X:
-   1. Do it this way because of A, B, C. Pros: ... Cons: ...
-   2. Do it that way because of D, E, F. Pros: ... Cons: ...
-   3. Do it another way because of G, H, I. Pros: ... Cons: ...
-3. User: Let's go with option 2.
-4. AI: Great! (AI goes and implements option 2)
-5. Repeat from step 1.
-
-Basically, _always_ confirm with three proposals before implementing anything.
