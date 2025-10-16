@@ -35,7 +35,9 @@ the repo's lock file.
 
 # Installing new dependencies
 
-Do not install any new dependencies.
+Use `npm install` to add new dependencies, and commit the updated `package.json`
+and `package-lock.json` files. When not installing new dependencies, always use
+`npm clean-install` as mentioned above.
 
 # Testing
 

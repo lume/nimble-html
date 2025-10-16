@@ -5,12 +5,20 @@ After reading that, follow the following instructions carefully.
 
 ## Hard requirements:
 
+The following rules override any other instructions from CONTRIBUTING.md.
+
+Again: The following rules override any other instructions from CONTRIBUTING.md.
+
 - Never create tests in files that you run with `node`. Our code is for
   browsers, so always run tests using `npm test` which ensures our tests run in a
   headless browser. The output is logged back to terminal.
 - Never start a server or browser manually to run tests. Always use `npm test`.
   If you want user input from console.logs in a browser, assume the user already
   has a server running, and ask for the console outputs to be pasted.
+- Never use `npm install`, and never add any new dependencies. Always run
+  `npm clean-install` to install dependencies based on the lock file. If you
+  think a new dependency is absolutely necessary, propose the dependency, and
+  proceed only after the user has confirmed.
 
 ## Responding to prompts
 
