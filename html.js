@@ -37,6 +37,66 @@ export function mathml(strings, ...values) {
 	return handleTemplateTag('mathml', strings, ...values)
 }
 
+/** Unique symbol to mark force wrapped values */
+const FORCE_SYMBOL = Symbol('force')
+
+/**
+ * Wrap a value in `force()` to indicate that it should not be checked for
+ * changes when applying updates.
+ *
+ * @param {InterpolationValue} value
+ */
+export function force(value) {
+	return {[FORCE_SYMBOL]: value}
+}
+
+/**
+ * Check if a value is wrapped with force()
+ * @param {InterpolationValue} value
+ * @returns {boolean}
+ */
+function isForceWrapped(value) {
+	return typeof value === 'object' && value !== null && FORCE_SYMBOL in value
+}
+
+/**
+ * Unwrap a force wrapped value
+ * @param {InterpolationValue} value
+ * @returns {InterpolationValue}
+ */
+function unwrapForce(value) {
+	if (isForceWrapped(value)) return /** @type {any} */ (value)[FORCE_SYMBOL]
+	return value
+}
+
+/**
+ * Handle force detection and unwrapping for a site
+ * @param {InterpolationSite} site
+ * @param {InterpolationValue} value
+ * @returns {InterpolationValue} The unwrapped value
+ */
+function handleForceValue(site, value) {
+	const isWrapped = isForceWrapped(value)
+
+	if (site.requiresUnwrapping) {
+		// This site has been marked as requiring unwrapping
+		if (!isWrapped) {
+			throw new Error(
+				'Value must be wrapped with force() for this interpolation site. Once force() is used at a site, it must always be used.',
+			)
+		}
+		return unwrapForce(value)
+	} else if (isWrapped) {
+		// First time seeing force at this site
+		site.skipEqualityCheck = true
+		site.requiresUnwrapping = true
+		return unwrapForce(value)
+	}
+
+	// Normal value, no unwrapping needed
+	return value
+}
+
 /**
  * @param {TemplateMode} mode
  * @param {TemplateStringsArray} strings
@@ -198,33 +258,58 @@ class Template {
 				} else if (inQuotes && char === quoteChar) {
 					inQuotes = false
 					quoteChar = ''
-				} else if (!inQuotes && (char === '.' || char === '@') && i > 0 && /\s/.test(tagMatch[i - 1])) {
-					// Found a dot or @ that's not inside quotes and is preceded by whitespace (attribute name)
-					// Scan forward to find the end of the attribute name
-					let attrEnd = i + 1
-					while (attrEnd < tagMatch.length && !ATTRIBUTE_END_REGEXP.test(tagMatch[attrEnd])) attrEnd++
+				} else if (!inQuotes && i > 0 && /\s/.test(tagMatch[i - 1])) {
+					// Detect attribute patterns when preceded by whitespace and not in quotes
+					let prefix = null
 
-					if (attrEnd > i + 1) {
-						// We found at least one character after the dot/at symbol
-						const attrName = tagMatch.slice(i + 1, attrEnd) // Extract attribute name without the prefix
-						const placeholder = `${char}case-preserved${counter}`
-						caseMappings.set(placeholder.slice(1), attrName)
-						counter++
+					// Detect different attribute patterns
+					if (char === '.' || char === '@') {
+						// Case 1: .prop or @event (case-sensitive attributes)
+						prefix = char
+					} else if (char === '!' && i + 1 < tagMatch.length) {
+						const nextChar = tagMatch[i + 1]
+						// Case 2: !@event (forced case-sensitive event attributes)
+						if (nextChar === '.') prefix = '!.'
+						// Case 3: !.prop (forced case-sensitive property attributes)
+						if (nextChar === '@') prefix = '!@'
+						// Case 4: !?attr (forced boolean attributes, no special handling needed)
+						else if (nextChar === '?') prefix = null
+						// Case 5: !attr (forced regular attributes, no special handling needed)
+						else if (/[a-zA-Z]/.test(nextChar)) prefix = null
+					}
 
-						// Add the part before this replacement
-						parts.push(tagMatch.slice(lastIndex, i))
-						// Add the placeholder
-						parts.push(placeholder)
-						// Update tracking
-						lastIndex = attrEnd
-						i = attrEnd - 1 // -1 because the loop will increment
+					// Process case-sensitive attributes
+					if (prefix) {
+						const startIndex = i
+						const attrStartIndex = startIndex + prefix.length
+						let attrEnd = attrStartIndex
+
+						while (attrEnd < tagMatch.length && !ATTRIBUTE_END_REGEXP.test(tagMatch[attrEnd])) attrEnd++
+
+						if (attrEnd > attrStartIndex) {
+							// Extract the attribute name
+							const attrName = tagMatch.slice(attrStartIndex, attrEnd)
+							let placeholder
+
+							// Properties and events use case-preserved placeholders
+							placeholder = `${prefix}case-preserved${counter}`
+							const hasForce = prefix.startsWith('!')
+							caseMappings.set(placeholder.slice(hasForce ? 2 : 1), attrName)
+
+							counter++
+
+							// Add the part before this replacement
+							parts.push(tagMatch.slice(lastIndex, startIndex))
+							parts.push(placeholder) // Add the placeholder (skip ! for case-sensitive attributes)
+							lastIndex = attrEnd // Update tracking
+							i = attrEnd - 1 // -1 because the loop will increment
+						}
 					}
 				}
 				i++
 			}
 
-			// Add the remaining part
-			parts.push(tagMatch.slice(lastIndex))
+			parts.push(tagMatch.slice(lastIndex)) // Add the remaining part
 
 			return parts.join('')
 		})
@@ -398,45 +483,58 @@ function findInterpolationSites(fragment, caseMappings) {
 		} else if (node.nodeType === Node.ELEMENT_NODE) {
 			const element = /** @type {Element} */ (node)
 
+			// A list of placeholder attributes to remove after finding
+			// interpolation sites (f.e. !foo="" is removed, as it will be set
+			// dynamically later)
 			const attributesToRemove = []
 
 			for (const attr of element.attributes) {
 				const name = attr.name
 				const value = attr.value
 
-				// Handle both interpolated and static special attributes
+				// Handle both interpolated and static special attributes, plus regular attributes marked with !
 				if (
 					value.includes(INTERPOLATION_MARKER) ||
 					name.startsWith('?') ||
 					name.startsWith('.') ||
-					name.startsWith('@')
+					name.startsWith('@') ||
+					name.startsWith('!')
 				) {
-					// Parse attribute value parts (for interpolated content)
+					const isStatic = !value.includes(INTERPOLATION_MARKER)
+
 					let parsedParts
-					if (value.includes(INTERPOLATION_MARKER))
-						parsedParts = parseInterpolationParts(value.split(INTERPOLATION_REGEXP), false)
-					// Static content
-					else parsedParts = [value]
+					if (isStatic) parsedParts = [value]
+					// Parse attribute value parts (for interpolated content)
+					else parsedParts = parseInterpolationParts(value.split(INTERPOLATION_REGEXP), false)
 
 					// Determine attribute type and restore case for JS properties
 					/** @type {'attribute'|'boolean-attribute'|'property'|'event'} */
 					let type = 'attribute'
-					let processedName = name
+					let processedName = '' // The name without special prefixes
+					let skipEqualityCheck = name.startsWith('!')
 
-					if (name.startsWith('?')) {
+					if (name.startsWith('?') || name.startsWith('!?')) {
 						type = 'boolean-attribute'
-						processedName = name.slice(1) // Remove the question mark
-					} else if (name.startsWith('.')) {
+						processedName = name.slice(skipEqualityCheck ? 2 : 1) // Extract the name after ? or !?
+					} else if (name.startsWith('.') || name.startsWith('!.')) {
 						type = 'property'
-						const placeholder = name.slice(1) // Remove the dot
+						const placeholder = name.slice(skipEqualityCheck ? 2 : 1) // Extract the name after . or !.
 						processedName = caseMappings.get(placeholder) || placeholder
-					} else if (name.startsWith('@')) {
+					} else if (name.startsWith('@') || name.startsWith('!@')) {
 						type = 'event'
-						const placeholder = name.slice(1) // Remove the at symbol
+						const placeholder = name.slice(skipEqualityCheck ? 2 : 1) // Extract the name after @ or !@
 						processedName = caseMappings.get(placeholder) || placeholder
+					} else {
+						type = 'attribute'
+						processedName = skipEqualityCheck ? name.slice(1) : name // Extract name after ! if present
+						// Ensure static forced attributes are set initially. Basically !foo="bar" acts like foo="bar".
+						if (isStatic && skipEqualityCheck) element.setAttribute(processedName, value)
 					}
 
-					sites.push({node: element, type, attributeName: processedName, parts: parsedParts})
+					/** @type {InterpolationSite} */
+					const site = {node: element, type, attributeName: processedName, parts: parsedParts, skipEqualityCheck}
+
+					sites.push(site)
 
 					// Remove the template attribute, it will be set dynamically later
 					attributesToRemove.push(name)
@@ -516,19 +614,22 @@ function insertNodesAndUpdateSite(site, nodes, originalValue) {
 }
 
 function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {InterpolationValue} */ value) {
+	// Handle force detection and unwrapping
+	const unwrappedValue = handleForceValue(site, value)
+
 	// Handle simple text cases first (most common case)
-	if (!(value instanceof Node) && !Array.isArray(value) && typeof value !== 'function') {
+	if (!(unwrappedValue instanceof Node) && !Array.isArray(unwrappedValue) && typeof unwrappedValue !== 'function') {
 		// Simple text content - handle directly without creating extra text nodes
-		if (site.cachedValue === value) return // No change
+		if (!site.skipEqualityCheck && site.cachedValue === unwrappedValue) return // No change
 
 		clearPreviousNodes(site)
-		site.node.textContent = String(value ?? '')
+		site.node.textContent = String(unwrappedValue ?? '')
 		site.insertedNodes = undefined
-		site.cachedValue = value
+		site.cachedValue = unwrappedValue
 	} else {
 		// Handle complex cases that produce DOM nodes
 		// Convert single values to arrays for uniform processing
-		const itemsToProcess = Array.isArray(value) ? value : [value]
+		const itemsToProcess = Array.isArray(unwrappedValue) ? unwrappedValue : [unwrappedValue]
 
 		const nodes = /** @type {(Element | Text)[]} */ (
 			itemsToProcess
@@ -558,8 +659,8 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 				.filter(Boolean)
 		)
 
-		if (site.insertedNodes && arrayEquals(site.insertedNodes, nodes)) return // No change
-		insertNodesAndUpdateSite(site, nodes, value)
+		if (!site.skipEqualityCheck && site.insertedNodes && arrayEquals(site.insertedNodes, nodes)) return // No change
+		insertNodesAndUpdateSite(site, nodes, unwrappedValue)
 	}
 }
 
@@ -597,10 +698,28 @@ class TemplateInstance {
 				const element = /** @type {Element} */ (site.node)
 				const parts = site.parts || []
 
-				// Check for nested templates/DOM in attributes - this should throw
-				// Only check values that are actually used in this attribute's parts
-				const attributeValues = parts.filter(part => typeof part === 'number').map(part => values[part])
-				if (arrayEquals(/** @type {unknown[]} */ (site.cachedValue), attributeValues)) continue // No change
+				// Handle force detection and unwrapping for attribute values
+				// Check each interpolated value and handle force detection
+				const attributeValues = parts
+					.filter(part => typeof part === 'number')
+					.map(part => {
+						const value = values[part]
+						if (isForceWrapped(value)) {
+							if (!site.requiresUnwrapping) {
+								site.skipEqualityCheck = true
+								site.requiresUnwrapping = true
+							}
+							return unwrapForce(value)
+						} else if (site.requiresUnwrapping) {
+							throw new Error(
+								'Value must be wrapped with force() for this interpolation site. Once force() is used at a site, it must always be used.',
+							)
+						}
+						return value
+					})
+
+				if (!site.skipEqualityCheck && arrayEquals(/** @type {unknown[]} */ (site.cachedValue), attributeValues))
+					continue // No change
 
 				// Check if any attribute value would produce DOM nodes - not allowed in attributes
 				if (
@@ -611,7 +730,13 @@ class TemplateInstance {
 					)
 				}
 
-				const newAttributeValue = joinPartsWithValues(parts, values)
+				// Create values array with unwrapped values for string joining
+				const processedValues = [...values]
+				let attributeValueIndex = 0
+				for (const part of parts)
+					if (typeof part === 'number') processedValues[part] = attributeValues[attributeValueIndex++]
+
+				const newAttributeValue = joinPartsWithValues(parts, processedValues)
 				element.setAttribute(site.attributeName || '', newAttributeValue)
 				site.cachedValue = attributeValues
 			} else if (site.type === 'boolean-attribute') {
@@ -621,13 +746,13 @@ class TemplateInstance {
 				let setAttribute = false
 				// Pure interpolation - pattern is ['', number, '']
 				if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number')
-					setAttribute = !!values[parts[1]]
+					setAttribute = !!handleForceValue(site, values[parts[1]])
 				// Static content - single string part
 				else if (parts.length === 1 && typeof parts[0] === 'string') setAttribute = parts[0].trim() !== ''
 				// Mixed content - always truthy (has both static and dynamic parts)
 				else setAttribute = true
 
-				if (site.cachedValue === setAttribute) continue // No change
+				if (!site.skipEqualityCheck && site.cachedValue === setAttribute) continue // No change
 
 				if (setAttribute) element.setAttribute(site.attributeName || '', '')
 				else element.removeAttribute(site.attributeName || '')
@@ -640,11 +765,17 @@ class TemplateInstance {
 				let propValue
 				// Pure interpolation - pattern is ['', number, '']
 				if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number')
-					propValue = values[parts[1]]
+					propValue = handleForceValue(site, values[parts[1]])
 				// Mixed content or static content
-				else propValue = joinPartsWithValues(parts, values)
+				else {
+					// For mixed content, we need to handle force for each interpolated part
+					const processedValues = [...values]
+					for (const part of parts)
+						if (typeof part === 'number') processedValues[part] = handleForceValue(site, values[part])
+					propValue = joinPartsWithValues(parts, processedValues)
+				}
 
-				if (site.cachedValue === propValue) continue // No change
+				if (!site.skipEqualityCheck && site.cachedValue === propValue) continue // No change
 
 				const propName = site.attributeName || ''
 				const anyElement = /** @type {any} */ (element)
@@ -658,11 +789,17 @@ class TemplateInstance {
 				// Determine the current handler value for comparison
 				let inputValue
 				if (parts.length === 3 && parts[0] === '' && parts[2] === '' && typeof parts[1] === 'number')
-					inputValue = values[parts[1]]
-				else inputValue = joinPartsWithValues(parts, values)
+					inputValue = handleForceValue(site, values[parts[1]])
+				else {
+					// For mixed content, handle force for each interpolated part
+					const processedValues = [...values]
+					for (const part of parts)
+						if (typeof part === 'number') processedValues[part] = handleForceValue(site, values[part])
+					inputValue = joinPartsWithValues(parts, processedValues)
+				}
 
 				// Only update event handler if it has changed
-				if (site.cachedValue === inputValue) continue // No change
+				if (!site.skipEqualityCheck && site.cachedValue === inputValue) continue // No change
 
 				// Determine the actual event listener to use
 				let eventListener
@@ -724,7 +861,9 @@ class TemplateInstance {
  *   insertedNodes?: (Element | Text)[],
  *   cachedValue?: unknown,
  *   internalHandler?: EventListener,
- *   currentEventListener?: EventListener
+ *   currentEventListener?: EventListener,
+ *   skipEqualityCheck?: boolean,
+ *   requiresUnwrapping?: boolean
  * }} InterpolationSite
  */
 

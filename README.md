@@ -1,6 +1,11 @@
 # nimble-html
 
-A light-weight template tag library with `html`, `svg`, and `mathml` functions for writing declarative-reactive web apps.
+A light-weight single-file dependency-free template tag library with `html`,
+`svg`, and `mathml` functions for writing declarative-reactive web apps.
+
+Nimble like Grogu.
+
+<img src="./examples/images/grogu-runs.jpg" width="180" />
 
 ## At a glance
 
@@ -71,8 +76,8 @@ console.log(div.textContent) // "Message: Hello Webdev"
 
 # Examples
 
-- [Basic](https://rawcdn.githack.com/lume/nimble-html/c250c4f8db47d623fb4643613f1370dbac2d936f/examples/basic.html) - [source](./examples/basic.html)
-- [Custom Elements](https://rawcdn.githack.com/lume/nimble-html/c250c4f8db47d623fb4643613f1370dbac2d936f/examples/custom-elements/index.html) - [source](./examples/custom-elements/index.html)
+- [Basic](https://raw.githack.com/lume/nimble-html/main/examples/basic.html) - [source](./examples/basic.html)
+- [Custom Elements](https://raw.githack.com/lume/nimble-html/main/examples/custom-elements/index.html) - [source](./examples/custom-elements/index.html)
 
 # Installation
 
@@ -81,7 +86,7 @@ from GitHub into your JS code (f.e. using the raw.githack.com proxy):
 
 ```html
 <script type="module">
-  import {html, svg, mathml} from 'https://rawcdn.githack.com/lume/nimble-html/v0.1.0/html.js'
+  import {html, svg, mathml} from 'https://rawcdn.githack.com/lume/nimble-html/v0.1.4/html.js'
 
   const feeling = 'wonderfulness'
   const [div] = html`<div>${feeling}</div>`()
@@ -461,6 +466,127 @@ const mrow = article.querySelector('mrow')
 console.log(mrow.namespaceURI) // "http://www.w3.org/1998/Math/MathML"
 ```
 
+## Skipping Equality Checks
+
+By default, nimble-html performs equality checks to avoid unnecessary DOM
+updates. If a value hasn't changed between renders, the DOM won't be updated.
+However, sometimes you need to force updates even when values are the same.
+
+There are two ways to force updates: the lightsaber `!` syntax <img src="./examples/images/lightsabers.png" height="18" />,
+and the `force()` function <img src="./examples/images/grogu.webp" height="18" />.
+
+### The Lightsaber Syntax <img src="./examples/images/lightsabers.png" height="20" /> (recommended)
+
+Prefix any attribute binding with a lightsaber (`!`) to force updates regardless of value equality:
+
+```javascript
+import {html} from 'nimble-html'
+
+const key = Symbol()
+let value = 'same'
+const clickHandler = () => console.log('clicked')
+
+// Force updates with ! prefix
+const template = () =>
+  html`
+    <!-- These will always update, even with the same value -->
+
+    <!-- Regular attribute -->
+    <div !class=${value}></div>
+
+    <!-- Boolean attribute -->
+    <input !?disabled=${true} />
+
+    <!-- JS property -->
+    <input !.value=${value} />
+
+    <!-- Event handler -->
+    <button !@click=${clickHandler}>Click</button>
+  `(key)
+
+const [div, input1, input2, button] = template() // First render
+template() // Second render - all DOM values are updated again
+```
+
+### The `force()` Function <img src="./examples/images/grogu.webp" height="20" />
+
+Alternatively, namely for scenarios where the lightsaber `!` syntax cannot be
+used due to static analysis tool limitations that may only understand Lit-based
+syntax, you can wrap any interpolated value with `force()` to achieve the same
+effect (while achieving compatibility with Lit-based tools):
+
+```javascript
+import {html, force} from 'nimble-html'
+
+const key = Symbol()
+let value = 'same'
+
+const template = () =>
+  html`
+    <!-- These will always update, even with the same value -->
+    <div class=${force(value)}></div>
+    <div>${force('text content')}</div>
+    <input .value=${force(value)} />
+  `(key)
+
+template() // First render
+template() // Second render - all DOM values are updated again
+```
+
+> [!Note]
+> Only `force()` can be used with text content interpolations, i.e.
+> `<p>${force(value)}</p>`, as the lightsaber `!` syntax only applies to element
+> attributes, properties, and events.
+
+### When to Use Force <img src="./examples/images/mando.webp" height="20" />
+
+Force updates are useful for:
+
+- **Performance-sensitive updates**: For example when the value to set is an
+  array, and we only need to change a subset of items in the array. In such cases,
+  triggering reactivity without creating a new array reference can be much faster,
+  especially with large arrays that contain primitive values as those values will
+  otherwise be copied in memory if a new array is created, triggering unnecessary
+  garbage collections. By using `force()`, we can avoid creating new array
+  references with copied values while forcing an underlying element to re-process
+  the array contents.
+- **Stateful components**: When the same value should trigger side effects. For
+  example, triggering a sound any time a value is set, even if unchanged, so that
+  hitting a button repeatedly triggers the sound.
+- **Forcing DOM updates**: For example triggering MutationObserver callbacks to
+  re-run logic, or to reset state modified by external code.
+- **Third-party integration**: When external libraries need explicit updates for
+  any reason.
+
+> [!Warning]
+> Be careful with the force. Overusing it can lead to performance issues since it
+> bypasses the built-in optimization of avoiding unnecessary DOM updates. Use it
+> only when necessary.
+
+### Mixing Approaches
+
+Combining both `!` and `force()` for the same interpolation works, but is unnecessary:
+
+```javascript
+const template = () =>
+  html`
+    <!-- Both ! and force() -->
+    <div !class=${force('combined')}></div>
+  `(key)
+```
+
+### Isolation
+
+The force update behavior is isolated to specific attributes - it doesn't affect
+other attributes in the same template:
+
+```javascript
+const template = () => html` <div !class=${'always-updates'} title=${'normal-behavior'}></div> `(key)
+
+// Only the 'class' attribute will force update
+// The 'title' attribute will use normal equality checking
+```
+
 # Making Higher-level Frameworks
 
 It's really simple with this nimble `html` tag!
@@ -473,6 +599,10 @@ templates:
 
 ```javascript
 class MyElement extends HTMLElement {
+  static {
+    customElements.define('my-element', this)
+  }
+
   #value = 123
 
   get value() {
@@ -494,8 +624,6 @@ class MyElement extends HTMLElement {
     this.shadowRoot.append(...this.template())
   }
 }
-
-customElements.define('my-element', MyElement)
 
 const key = Symbol()
 const app = value => html`<my-element .value=${value}></my-element>`(key)
@@ -548,6 +676,35 @@ const mathTemplate = mathml`<mfrac><mi>a</mi><mi>b</mi></mfrac>`
 - Boolean attributes: `?attr=${boolean}`
 - Properties: `.prop=${value}` _(case-sensitive)_
 - Events: `@event=${handler}` _(case-sensitive)_
+
+## Utility Functions
+
+### `force(value)`
+
+Wraps a value to force DOM updates even when the new value is equal to the
+previous value. This bypasses nimble-html's built-in equality checking
+optimization.
+
+This function provides the same functionality as the lightsaber `!` syntax
+prefix (e.g., `!class=${value}`), but in function form for scenarios where
+static analysis tools made for Lit cannot otherwise understand the `!` syntax.
+
+```js
+import {html, force} from 'nimble-html'
+
+// Force update even with the same value
+const template = html`<div class=${force(className)}></div>`
+const template2 = html`<div>${force('same text')}</div>`
+const template3 = html`<input .value=${force(inputValue)} />`
+```
+
+**Parameters:**
+
+- `value`: Any - The value to wrap for forced updates
+
+**Returns:**
+
+- `Object` - A wrapped value that will always trigger DOM updates
 
 # Development
 

@@ -78,7 +78,7 @@ reference, using `describe` and `it` functions to describe unit tests.
 - Always prefer `const` for variables that don't change, and `let` only for
   variables that change. Never use `var` unless absolutely necessary for special
   hoisting reasons.
-- Always prefer for-of over items.forEach
+- Always prefer for-of over `items.forEach`
 - Always prefer `element.remove()` instead of `element.parentNode.removeChild(element)`.
 - Always prefer `parentElement.append(childElement)` instead of
   `parentElement.appendChild(childElement)`.
