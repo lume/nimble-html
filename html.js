@@ -641,13 +641,11 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 						// template functions at the same site but different positions don't share cache entries,
 						// even when using the same mapper function (e.g., html`<ul>${items.map(itemMapper)}</ul>`).
 						const stableKey = getStableNestedKey(site, index)
-						const result = item(stableKey)
-						return Array.isArray(result) ? result : [result]
+						return item(stableKey)
 					}
 					// Handle arrays (already processed template results)
-					if (Array.isArray(item)) {
-						return item.flat(1) // Flatten one level in case of nested arrays
-					}
+					// Flatten one level because html functions return arrays
+					if (Array.isArray(item)) return item.flat(1)
 					// Handle single nodes or primitive values
 					return [item]
 				})
