@@ -8,6 +8,7 @@ class CoolCounter extends Base {
 		return this.#value
 	}
 	set value(v) {
+		console.log('Setting value to', v)
 		this.#value = v
 		this.update()
 	}
@@ -31,8 +32,21 @@ class CoolCounter extends Base {
 		`
 	}
 
+	constructor() {
+		super()
+		console.log('CoolCounter constructed!')
+	}
+
+	#interval = 0
+
 	connectedCallback() {
-		setInterval(() => this.increment(), 1000)
+		console.log('CoolCounter connected!', this.value)
+		this.#interval = setInterval(() => this.increment(), 500)
+	}
+
+	disconnectedCallback() {
+		clearInterval(this.#interval)
+		console.log('CoolCounter disconnected!')
 	}
 }
 

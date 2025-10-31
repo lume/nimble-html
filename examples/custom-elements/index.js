@@ -3,14 +3,13 @@ import {Base} from './Base.js'
 import './cool-counter.js'
 
 class CustomElementExample extends Base {
-	#values1 = ['a', 'b', 'c', 'd', 'e']
-
-	#values2 = [1, 2, 3, 4, 5, 10, 11, 12]
-
+	#values1 = [10, 20, 30, 40, 50]
+	#values2 = [1, 2, 3, 4, 5, 6, 7, 8]
 	#useValues1 = true
 
 	connectedCallback() {
 		setInterval(() => {
+			console.log(' ---------------- Toggling values array ---------------- ')
 			this.#useValues1 = !this.#useValues1
 			this.update()
 		}, 2000)
@@ -25,11 +24,22 @@ class CustomElementExample extends Base {
 
 				<cool-counter .value=${101}></cool-counter>
 
-				<!-- Unlike Lit, this works too! -->
+				<!-- Static property-set syntax! (doesn't work in Lit) -->
 				<cool-counter .value="202"></cool-counter>
 
+				<hr style="width: 100%" />
+
+				<h1>Inside dynamic nested array mappped template:</h1>
+
 				<ul>
-					${(this.#useValues1 ? this.#values1 : this.#values2).map(v => html`<li>Value: ${v}</li>`)}
+					${(this.#useValues1 ? this.#values1 : this.#values2).map(
+						v => html`
+							<li>
+								Value: ${v}
+								<cool-counter .value=${v}></cool-counter>
+							</li>
+						`,
+					)}
 				</ul>
 			</div>
 
@@ -41,6 +51,9 @@ class CustomElementExample extends Base {
 					gap: 1em;
 					align-items: center;
 					justify-content: center;
+				}
+				li {
+					margin-bottom: 1em;
 				}
 			</style>
 		`
