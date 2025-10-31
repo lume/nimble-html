@@ -12,12 +12,12 @@ Nimble like Grogu.
 ```js
 import {html, svg, mathml} from 'nimble-html'
 
-const colors = ['red', 'green', 'blue']
+let colors = ['red', 'green', 'blue']
 const feeling = 'simplicity'
 
 const key = Symbol()
 
-const template = () => ...html`
+const template = () => html`
   <ul .onclick=${() => console.log(feeling)}>
     ${colors.map(c => html`<li>${c}</li>`)}
   </ul>
