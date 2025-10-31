@@ -582,37 +582,6 @@ function getStableNestedKey(site, index) {
 	return key
 }
 
-/**
- * Helper function to clear previously inserted nodes
- * @param {InterpolationSite} site
- */
-function clearPreviousNodes(site) {
-	if (site.insertedNodes) for (const node of site.insertedNodes) node.remove()
-}
-
-/**
- * Helper function to insert nodes and update site state
- * @param {InterpolationSite} site
- * @param {(Element | Text)[]} nodes
- * @param {InterpolationValue} originalValue
- */
-function insertNodesAndUpdateSite(site, nodes, originalValue) {
-	clearPreviousNodes(site)
-
-	if (nodes.length > 0) {
-		// Insert all nodes before the text node
-		for (const node of nodes) site.node.parentNode?.insertBefore(node, site.node)
-		site.node.textContent = '' // Hide the text node
-		site.insertedNodes = [...nodes]
-	} else {
-		// No nodes to insert - set empty text content
-		site.node.textContent = ''
-		site.insertedNodes = undefined
-	}
-
-	site.cachedValue = originalValue
-}
-
 function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {InterpolationValue} */ value) {
 	// Handle force detection and unwrapping
 	const unwrappedValue = handleForceValue(site, value)
@@ -620,12 +589,12 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 	// Handle simple text cases first (most common case)
 	if (!(unwrappedValue instanceof Node) && !Array.isArray(unwrappedValue) && typeof unwrappedValue !== 'function') {
 		// Simple text content - handle directly without creating extra text nodes
-		if (!site.skipEqualityCheck && site.cachedValue === unwrappedValue) return // No change
+		if (!site.skipEqualityCheck && site.lastValue === unwrappedValue) return // No change
 
 		clearPreviousNodes(site)
 		site.node.textContent = String(unwrappedValue ?? '')
 		site.insertedNodes = undefined
-		site.cachedValue = unwrappedValue
+		site.lastValue = unwrappedValue
 	} else {
 		// Handle complex cases that produce DOM nodes
 		// Convert single values to arrays for uniform processing
@@ -660,6 +629,37 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 		if (!site.skipEqualityCheck && site.insertedNodes && arrayEquals(site.insertedNodes, nodes)) return // No change
 		insertNodesAndUpdateSite(site, nodes, unwrappedValue)
 	}
+}
+
+/**
+ * Helper function to insert nodes and update site state
+ * @param {InterpolationSite} site
+ * @param {(Element | Text)[]} nodes
+ * @param {InterpolationValue} originalValue
+ */
+function insertNodesAndUpdateSite(site, nodes, originalValue) {
+	clearPreviousNodes(site)
+
+	if (nodes.length > 0) {
+		// Insert all nodes before the text node
+		for (const node of nodes) site.node.parentNode?.insertBefore(node, site.node)
+		site.node.textContent = '' // Hide the text node
+		site.insertedNodes = [...nodes]
+	} else {
+		// No nodes to insert - set empty text content
+		site.node.textContent = ''
+		site.insertedNodes = undefined
+	}
+
+	site.lastValue = originalValue
+}
+
+/**
+ * Helper function to clear previously inserted nodes
+ * @param {InterpolationSite} site
+ */
+function clearPreviousNodes(site) {
+	if (site.insertedNodes) for (const node of site.insertedNodes) node.remove()
 }
 
 /**
@@ -716,8 +716,7 @@ class TemplateInstance {
 						return value
 					})
 
-				if (!site.skipEqualityCheck && arrayEquals(/** @type {unknown[]} */ (site.cachedValue), attributeValues))
-					continue // No change
+				if (!site.skipEqualityCheck && arrayEquals(/** @type {unknown[]} */ (site.lastValue), attributeValues)) continue // No change
 
 				// Check if any attribute value would produce DOM nodes - not allowed in attributes
 				if (
@@ -736,7 +735,7 @@ class TemplateInstance {
 
 				const newAttributeValue = joinPartsWithValues(parts, processedValues)
 				element.setAttribute(site.attributeName || '', newAttributeValue)
-				site.cachedValue = attributeValues
+				site.lastValue = attributeValues
 			} else if (site.type === 'boolean-attribute') {
 				const element = /** @type {Element} */ (site.node)
 				const parts = site.parts || []
@@ -750,12 +749,12 @@ class TemplateInstance {
 				// Mixed content - always truthy (has both static and dynamic parts)
 				else setAttribute = true
 
-				if (!site.skipEqualityCheck && site.cachedValue === setAttribute) continue // No change
+				if (!site.skipEqualityCheck && site.lastValue === setAttribute) continue // No change
 
 				if (setAttribute) element.setAttribute(site.attributeName || '', '')
 				else element.removeAttribute(site.attributeName || '')
 
-				site.cachedValue = setAttribute
+				site.lastValue = setAttribute
 			} else if (site.type === 'property') {
 				const element = /** @type {Element} */ (site.node)
 				const parts = site.parts || []
@@ -773,12 +772,12 @@ class TemplateInstance {
 					propValue = joinPartsWithValues(parts, processedValues)
 				}
 
-				if (!site.skipEqualityCheck && site.cachedValue === propValue) continue // No change
+				if (!site.skipEqualityCheck && site.lastValue === propValue) continue // No change
 
 				const propName = site.attributeName || ''
 				const anyElement = /** @type {any} */ (element)
 				anyElement[propName] = propValue
-				site.cachedValue = propValue
+				site.lastValue = propValue
 			} else if (site.type === 'event') {
 				const element = /** @type {Element} */ (site.node)
 				const parts = site.parts || []
@@ -797,7 +796,7 @@ class TemplateInstance {
 				}
 
 				// Only update event handler if it has changed
-				if (!site.skipEqualityCheck && site.cachedValue === inputValue) continue // No change
+				if (!site.skipEqualityCheck && site.lastValue === inputValue) continue // No change
 
 				// Determine the actual event listener to use
 				let eventListener
@@ -835,7 +834,7 @@ class TemplateInstance {
 					}
 				}
 
-				site.cachedValue = inputValue
+				site.lastValue = inputValue
 			}
 		}
 	}
@@ -857,7 +856,7 @@ class TemplateInstance {
  *   parts?: Array<string | number>,
  *   interpolationIndex?: number,
  *   insertedNodes?: (Element | Text)[],
- *   cachedValue?: unknown,
+ *   lastValue?: unknown,
  *   internalHandler?: EventListener,
  *   currentEventListener?: EventListener,
  *   skipEqualityCheck?: boolean,
