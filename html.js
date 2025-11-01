@@ -586,15 +586,15 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 	// Handle force detection and unwrapping
 	const unwrappedValue = handleForceValue(site, value)
 
+	if (!site.skipEqualityCheck && site.lastValue === unwrappedValue) return // No change
+	site.lastValue = unwrappedValue
+
 	// Handle simple text cases first (most common case)
 	if (!(unwrappedValue instanceof Node) && !Array.isArray(unwrappedValue) && typeof unwrappedValue !== 'function') {
-		// Simple text content - handle directly without creating extra text nodes
-		if (!site.skipEqualityCheck && site.lastValue === unwrappedValue) return // No change
-
+		// Simple text content, just set textContent
 		clearPreviousNodes(site)
 		site.node.textContent = String(unwrappedValue ?? '')
 		site.insertedNodes = undefined
-		site.lastValue = unwrappedValue
 	} else {
 		// Handle complex cases that produce DOM nodes
 		// Convert single values to arrays for uniform processing
@@ -626,8 +626,9 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
 				.filter(Boolean)
 		)
 
+		// TODO array reconciliation for better performance on large lists. For now, if any one item changes, we re-insert all nodes.
 		if (!site.skipEqualityCheck && site.insertedNodes && arrayEquals(site.insertedNodes, nodes)) return // No change
-		insertNodesAndUpdateSite(site, nodes, unwrappedValue)
+		insertNodesAndUpdateSite(site, nodes)
 	}
 }
 
@@ -635,9 +636,8 @@ function interpolateTextSite(/** @type {InterpolationSite} */ site, /** @type {I
  * Helper function to insert nodes and update site state
  * @param {InterpolationSite} site
  * @param {(Element | Text)[]} nodes
- * @param {InterpolationValue} originalValue
  */
-function insertNodesAndUpdateSite(site, nodes, originalValue) {
+function insertNodesAndUpdateSite(site, nodes) {
 	clearPreviousNodes(site)
 
 	if (nodes.length > 0) {
@@ -650,8 +650,6 @@ function insertNodesAndUpdateSite(site, nodes, originalValue) {
 		site.node.textContent = ''
 		site.insertedNodes = undefined
 	}
-
-	site.lastValue = originalValue
 }
 
 /**
@@ -688,10 +686,8 @@ class TemplateInstance {
 		for (const site of sites) {
 			if (site.type === 'text') {
 				// With pre-split text nodes, each text site corresponds to exactly one interpolation
-				if (site.interpolationIndex !== undefined) {
-					const value = values[site.interpolationIndex]
-					interpolateTextSite(site, value)
-				}
+				const value = values[/** @type {number} */ (site.interpolationIndex)]
+				interpolateTextSite(site, value)
 			} else if (site.type === 'attribute') {
 				const element = /** @type {Element} */ (site.node)
 				const parts = site.parts || []
