@@ -78,6 +78,7 @@ console.log(div.textContent) // "Message: Hello Webdev"
 
 - [Basic](https://raw.githack.com/lume/nimble-html/main/examples/basic.html) - [source](./examples/basic.html)
 - [Custom Elements](https://raw.githack.com/lume/nimble-html/main/examples/custom-elements/index.html) - [source](./examples/custom-elements/index.html)
+- [Forkable CodePen Example](https://codepen.io/trusktr/pen/emZBgYO)
 
 # Installation
 
