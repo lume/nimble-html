@@ -139,6 +139,24 @@ const HTML_TAG_REGEXP = /<[^<>]*?\/?>/g
 const ATTRIBUTE_END_REGEXP = /[\s=\/>]/
 
 /**
+ * Visit descendants in the light DOM and any open shadow roots.
+ * @param {Node} root
+ * @param {(node: Node) => void} callback
+ */
+function walkNodesIncludingShadowRoots(root, callback) {
+	for (const node of Array.from(root.childNodes)) {
+		callback(node)
+
+		if (node.nodeType === Node.ELEMENT_NODE) {
+			const shadowRoot = /** @type {Element} */ (node).shadowRoot
+			if (shadowRoot) walkNodesIncludingShadowRoots(shadowRoot, callback)
+		}
+
+		walkNodesIncludingShadowRoots(node, callback)
+	}
+}
+
+/**
  * Parse parts array, converting alternating indices to numbers
  * @param {string[]} parts
  * @param {boolean} isTopLevel - Whether this text node is at the top level of the template
@@ -172,35 +190,28 @@ function joinPartsWithValues(parts, values) {
  * @param {DocumentFragment} fragment
  */
 function splitTextNodesWithInterpolation(fragment) {
-	const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT, null)
-	let textNode = /** @type {Text | null} */ (walker.nextNode())
-
-	while (textNode) {
-		// Collect the next node first, so we don't break iteration when replacing the current node.
-		const nextNode = /** @type {Text | null} */ (walker.nextNode())
+	walkNodesIncludingShadowRoots(fragment, node => {
+		if (node.nodeType !== Node.TEXT_NODE) return
+		const textNode = /** @type {Text} */ (node)
 		const textContent = textNode.textContent || ''
-
 		// Split each text node with an interpolation
-		if (textContent.includes(INTERPOLATION_MARKER)) {
-			// Check if this text node is a direct child of the template fragment (top level)
-			const isTopLevel = textNode.parentNode === fragment
-			const parts = textContent.split(INTERPOLATION_REGEXP)
-			const parsedParts = parseInterpolationParts(parts, isTopLevel)
+		if (!textContent.includes(INTERPOLATION_MARKER)) return
+		// Check if this text node is a direct child of the template fragment (top level)
+		const isTopLevel = textNode.parentNode === fragment
+		const parts = textContent.split(INTERPOLATION_REGEXP)
+		const parsedParts = parseInterpolationParts(parts, isTopLevel)
 
-			// Only split if we have more than one part (static text + interpolations)
-			if (parsedParts.length > 1) {
-				const newTextNodes = parsedParts.map(
-					part => new Text(typeof part === 'number' ? `${INTERPOLATION_MARKER}${part}${INTERPOLATION_MARKER}` : part),
-				)
+		// Only split if we have more than one part (static text + interpolations)
+		if (parsedParts.length > 1) {
+			const newTextNodes = parsedParts.map(
+				part => new Text(typeof part === 'number' ? `${INTERPOLATION_MARKER}${part}${INTERPOLATION_MARKER}` : part),
+			)
 
-				// Replace the original text node with the split text nodes
-				// (static, interpolated, static, interpolated, etc)
-				textNode.replaceWith(...newTextNodes)
-			}
+			// Replace the original text node with the split text nodes
+			// (static, interpolated, static, interpolated, etc)
+			textNode.replaceWith(...newTextNodes)
 		}
-
-		textNode = nextNode
-	}
+	})
 }
 
 class Template {
@@ -244,6 +255,11 @@ class Template {
 		htmlString = htmlString.replace(HTML_TAG_REGEXP, tagMatch => {
 			// Parse the tag content more carefully to avoid matching dots inside quoted attribute values
 			const parts = []
+			const isTemplate =
+				tagMatch.slice(0, 9).toLowerCase() === '<template' && (tagMatch[9] === '>' || /\s/.test(tagMatch[9]))
+			const isSelfClosing = tagMatch.endsWith('/>')
+			let isShadow = false
+			let isClonableShadow = false
 			let lastIndex = 0
 			let inQuotes = false
 			let quoteChar = ''
@@ -260,6 +276,12 @@ class Template {
 					quoteChar = ''
 				} else if (!inQuotes && i > 0 && /\s/.test(tagMatch[i - 1])) {
 					// Detect attribute patterns when preceded by whitespace and not in quotes
+					let attrEnd = i
+					while (attrEnd < tagMatch.length && !ATTRIBUTE_END_REGEXP.test(tagMatch[attrEnd])) attrEnd++
+					const attributeName = tagMatch.slice(i, attrEnd).toLowerCase()
+					if (attributeName === 'shadowrootmode') isShadow = true
+					if (attributeName === 'shadowrootclonable') isClonableShadow = true
+
 					let prefix = null
 
 					// Detect different attribute patterns
@@ -282,9 +304,6 @@ class Template {
 					if (prefix) {
 						const startIndex = i
 						const attrStartIndex = startIndex + prefix.length
-						let attrEnd = attrStartIndex
-
-						while (attrEnd < tagMatch.length && !ATTRIBUTE_END_REGEXP.test(tagMatch[attrEnd])) attrEnd++
 
 						if (attrEnd > attrStartIndex) {
 							// Extract the attribute name
@@ -309,13 +328,15 @@ class Template {
 				i++
 			}
 
-			parts.push(tagMatch.slice(lastIndex)) // Add the remaining part
+			parts.push(tagMatch.slice(lastIndex, isSelfClosing ? -2 : -1))
+			if (isTemplate && isShadow && !isClonableShadow) parts.push(' shadowrootclonable')
+			parts.push(isSelfClosing ? ' />' : ' >')
 
 			return parts.join('')
 		})
 
 		// Use the standard HTML parser to parse the string into a template document
-		el.innerHTML = htmlString
+		el.setHTMLUnsafe(htmlString)
 
 		// For SVG and MathML templates, unwrap the content from the wrapper
 		// element that was added during parsing, and remove the wrapper, to
@@ -463,10 +484,7 @@ function parseTemplate(strings, mode) {
 function findInterpolationSites(fragment, caseMappings) {
 	/** @type {InterpolationSite[]} */
 	const sites = []
-	const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, null)
-
-	let node
-	while ((node = walker.nextNode())) {
+	walkNodesIncludingShadowRoots(fragment, node => {
 		if (node.nodeType === Node.TEXT_NODE) {
 			const textNode = /** @type {Text} */ (node)
 			const textContent = textNode.textContent || ''
@@ -543,7 +561,7 @@ function findInterpolationSites(fragment, caseMappings) {
 
 			for (const name of attributesToRemove) element.removeAttribute(name)
 		}
-	}
+	})
 
 	return sites
 }
