@@ -81,6 +81,46 @@ describe('html template function', () => {
 		testContent(p)
 	})
 
+	it('clones declarative shadow roots and updates bindings inside them', () => {
+		const key = Symbol()
+		let clicks = 0
+
+		/** @param {string} value @param {string} className @param {number} property */
+		const render = (value, className, property) =>
+			html`
+				<template></template>
+				<div>
+					<template shadowrootmode="open">
+						<button class="${className}" .someProp=${property} @click=${() => clicks++}>${value}</button>
+					</template>
+				</div>
+			`(key)
+
+		const [plainTemplate, host] = /** @type {[HTMLTemplateElement, HTMLDivElement]} */ (render('first', 'initial', 1))
+		assertTrue(!plainTemplate.hasAttribute('shadowrootclonable'), 'Regular templates should not be modified')
+		assertTrue(host.shadowRoot, 'Plain declarative shadow roots should survive instance cloning')
+
+		const shadowRoot = /** @type {ShadowRoot} */ (host.shadowRoot)
+		const button = /** @type {HTMLButtonElement & {someProp: number}} */ (shadowRoot.querySelector('button'))
+		assertEquals(button.textContent, 'first', 'Shadow root text interpolation should render')
+		assertEquals(button.getAttribute('class'), 'initial', 'Shadow root attribute interpolation should render')
+		assertEquals(button.someProp, 1, 'Shadow root property binding should render')
+		button.click()
+		assertEquals(clicks, 1, 'Shadow root event binding should be installed')
+
+		const [, updatedHost] = /** @type {[HTMLTemplateElement, HTMLDivElement]} */ (render('updated', 'changed', 2))
+		const updatedButton = /** @type {HTMLButtonElement & {someProp: number}} */ (
+			updatedHost.shadowRoot?.querySelector('button')
+		)
+		assertEquals(updatedHost, host, 'Keyed updates should reuse the host')
+		assertEquals(updatedButton, button, 'Keyed updates should reuse the shadow root button')
+		assertEquals(updatedButton.textContent, 'updated', 'Keyed updates should update shadow root text')
+		assertEquals(updatedButton.getAttribute('class'), 'changed', 'Keyed updates should update shadow root attributes')
+		assertEquals(updatedButton.someProp, 2, 'Keyed updates should update shadow root properties')
+		updatedButton.click()
+		assertEquals(clicks, 2, 'Keyed updates should preserve the shadow root event binding')
+	})
+
 	it('returns same instance for same key', () => {
 		const key = Symbol()
 
