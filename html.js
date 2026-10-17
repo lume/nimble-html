@@ -315,7 +315,7 @@ class Template {
 		})
 
 		// Use the standard HTML parser to parse the string into a template document
-		el.innerHTML = htmlString
+		el.setHTMLUnsafe(htmlString);
 
 		// For SVG and MathML templates, unwrap the content from the wrapper
 		// element that was added during parsing, and remove the wrapper, to
