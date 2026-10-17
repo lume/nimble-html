@@ -138,8 +138,6 @@ const HTML_TAG_REGEXP = /<[^<>]*?\/?>/g
 
 const ATTRIBUTE_END_REGEXP = /[\s=\/>]/
 
-const HTML_ATTRIBUTE_REGEXP = /\s+([^\s=/>]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/g
-
 /**
  * Visit descendants in the light DOM and any open shadow roots.
  * @param {Node} root
@@ -257,6 +255,10 @@ class Template {
 		htmlString = htmlString.replace(HTML_TAG_REGEXP, tagMatch => {
 			// Parse the tag content more carefully to avoid matching dots inside quoted attribute values
 			const parts = []
+			const isTemplate =
+				tagMatch.slice(0, 9).toLowerCase() === '<template' && (tagMatch[9] === '>' || /\s/.test(tagMatch[9]))
+			let isShadow = false
+			let isClonableShadow = false
 			let lastIndex = 0
 			let inQuotes = false
 			let quoteChar = ''
@@ -273,6 +275,12 @@ class Template {
 					quoteChar = ''
 				} else if (!inQuotes && i > 0 && /\s/.test(tagMatch[i - 1])) {
 					// Detect attribute patterns when preceded by whitespace and not in quotes
+					let attrEnd = i
+					while (attrEnd < tagMatch.length && !ATTRIBUTE_END_REGEXP.test(tagMatch[attrEnd])) attrEnd++
+					const attributeName = tagMatch.slice(i, attrEnd).toLowerCase()
+					if (attributeName === 'shadowrootmode') isShadow = true
+					if (attributeName === 'shadowrootclonable') isClonableShadow = true
+
 					let prefix = null
 
 					// Detect different attribute patterns
@@ -295,9 +303,6 @@ class Template {
 					if (prefix) {
 						const startIndex = i
 						const attrStartIndex = startIndex + prefix.length
-						let attrEnd = attrStartIndex
-
-						while (attrEnd < tagMatch.length && !ATTRIBUTE_END_REGEXP.test(tagMatch[attrEnd])) attrEnd++
 
 						if (attrEnd > attrStartIndex) {
 							// Extract the attribute name
@@ -322,17 +327,16 @@ class Template {
 				i++
 			}
 
-			parts.push(tagMatch.slice(lastIndex)) // Add the remaining part
-
-			let processedTag = parts.join('')
-			if (/^<template(?:\s|>)/i.test(processedTag)) {
-				const attributes = Array.from(processedTag.matchAll(HTML_ATTRIBUTE_REGEXP), match => match[1].toLowerCase())
-				if (attributes.includes('shadowrootmode') && !attributes.includes('shadowrootclonable')) {
-					processedTag = processedTag.replace(/\/?>$/, ending => ` shadowrootclonable${ending}`)
-				}
+			if (isTemplate && isShadow && !isClonableShadow) {
+				const endingStart = tagMatch.endsWith('/>') ? tagMatch.length - 2 : tagMatch.length - 1
+				parts.push(tagMatch.slice(lastIndex, endingStart))
+				parts.push(' shadowrootclonable')
+				parts.push(tagMatch.slice(endingStart))
+			} else {
+				parts.push(tagMatch.slice(lastIndex)) // Add the remaining part
 			}
 
-			return processedTag
+			return parts.join('')
 		})
 
 		// Use the standard HTML parser to parse the string into a template document
