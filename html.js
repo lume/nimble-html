@@ -328,12 +328,9 @@ class Template {
 				i++
 			}
 
-			if (isTemplate && isShadow && !isClonableShadow) {
-				parts.push(tagMatch.slice(lastIndex, tagMatch.length - (isSelfClosing ? 2 : 1)))
-				parts.push(' shadowrootclonable')
-				lastIndex = tagMatch.length - (isSelfClosing ? 2 : 1)
-			}
-			parts.push(tagMatch.slice(lastIndex)) // Add the remaining part
+			parts.push(tagMatch.slice(lastIndex, isSelfClosing ? -2 : -1))
+			if (isTemplate && isShadow && !isClonableShadow) parts.push(' shadowrootclonable')
+			parts.push(isSelfClosing ? ' />' : ' >')
 
 			return parts.join('')
 		})
