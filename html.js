@@ -257,6 +257,7 @@ class Template {
 			const parts = []
 			const isTemplate =
 				tagMatch.slice(0, 9).toLowerCase() === '<template' && (tagMatch[9] === '>' || /\s/.test(tagMatch[9]))
+			const isSelfClosing = tagMatch.endsWith('/>')
 			let isShadow = false
 			let isClonableShadow = false
 			let lastIndex = 0
@@ -327,10 +328,12 @@ class Template {
 				i++
 			}
 
-			const endingStart = tagMatch.endsWith('/>') ? tagMatch.length - 2 : tagMatch.length - 1
-			parts.push(tagMatch.slice(lastIndex, endingStart))
-			if (isTemplate && isShadow && !isClonableShadow) parts.push(' shadowrootclonable')
-			parts.push(tagMatch.slice(endingStart)) // Add the remaining part
+			if (isTemplate && isShadow && !isClonableShadow) {
+				parts.push(tagMatch.slice(lastIndex, tagMatch.length - (isSelfClosing ? 2 : 1)))
+				parts.push(' shadowrootclonable')
+				lastIndex = tagMatch.length - (isSelfClosing ? 2 : 1)
+			}
+			parts.push(tagMatch.slice(lastIndex)) // Add the remaining part
 
 			return parts.join('')
 		})
