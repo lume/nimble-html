@@ -327,14 +327,10 @@ class Template {
 				i++
 			}
 
-			if (isTemplate && isShadow && !isClonableShadow) {
-				const endingStart = tagMatch.endsWith('/>') ? tagMatch.length - 2 : tagMatch.length - 1
-				parts.push(tagMatch.slice(lastIndex, endingStart))
-				parts.push(' shadowrootclonable')
-				parts.push(tagMatch.slice(endingStart))
-			} else {
-				parts.push(tagMatch.slice(lastIndex)) // Add the remaining part
-			}
+			const endingStart = tagMatch.endsWith('/>') ? tagMatch.length - 2 : tagMatch.length - 1
+			parts.push(tagMatch.slice(lastIndex, endingStart))
+			if (isTemplate && isShadow && !isClonableShadow) parts.push(' shadowrootclonable')
+			parts.push(tagMatch.slice(endingStart)) // Add the remaining part
 
 			return parts.join('')
 		})
