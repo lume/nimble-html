@@ -9,6 +9,9 @@ export class Base extends HTMLElement {
 		super()
 
 		this.attachShadow({mode: 'open'})
+
+		// This is in a microtask so subclass data os available when template() is called.
+		// Alternatively run template() in connectedCallback.
 		queueMicrotask(() => this.shadowRoot?.append(...this.template()(this)))
 	}
 
